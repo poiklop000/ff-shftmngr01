@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { BarChart3, Loader2, FileDown, ExternalLink, RefreshCw, Calendar, Clock } from 'lucide-react';
 import { PageHelp } from '@/components/PageHelp';
+import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
 import type { Shift } from '@/types';
 import { fetchDowntimeBetween, formatDuration, localDateTimeToEpoch, type DowntimeEvent } from '@/lib/downtime';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
@@ -555,10 +556,9 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
                   style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid #cbd5e1', maxWidth: 160 }}
                 />
                 <select
-                  className="app-bar-shift-select"
-                  style={{ width: 'auto', fontSize: 12 }}
                   value={typeFilter}
                   onChange={(e) => setTypeFilter(e.target.value)}
+                  style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid #cbd5e1', color: '#0f172a', backgroundColor: '#fff' }}
                 >
                   <option value="All">All Types</option>
                   {downtimeTypes.map((t) => (
@@ -606,15 +606,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
                         <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{eventStartLabel(e)}</td>
                         <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{eventDuration(e)}</td>
                         <td className="px-4 py-3">
-                          <span
-                            style={{
-                              fontSize: 10, fontWeight: 700, borderRadius: 999, padding: '2px 8px', whiteSpace: 'nowrap',
-                              color: (e.downtime_type ?? '').toUpperCase().includes('SETUP') ? '#854d0e' : (e.downtime_type ?? '').toUpperCase().includes('RUNNING_SLOW') ? '#3f6212' : '#991b1b',
-                              backgroundColor: (e.downtime_type ?? '').toUpperCase().includes('SETUP') ? '#fef9c3' : (e.downtime_type ?? '').toUpperCase().includes('RUNNING_SLOW') ? '#d9f99d' : '#fee2e2',
-                            }}
-                          >
-                            {e.downtime_type ?? '-'}
-                          </span>
+                          <DowntimeTypeBadge type={e.downtime_type} />
                         </td>
                         <td className="px-4 py-3 text-slate-600">{e.category ?? '-'}</td>
                         <td className="px-4 py-3 text-slate-700" style={{ maxWidth: 260 }}>{e.reason ?? '-'}</td>

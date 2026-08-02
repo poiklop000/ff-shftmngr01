@@ -224,7 +224,7 @@ async function fetchSetupEventsFromDb(
     supabase
       .from('downtime_events')
       .select('*')
-      .eq('downtime_type', 'SETUP')
+      .in('downtime_type', ['SETUP', 'RUNNING_SLOW'])
       .gte('start_epoch', rangeStart)
       .lte('start_epoch', rangeEnd)
       .order('start_epoch', { ascending: false }),

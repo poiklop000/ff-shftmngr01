@@ -4,10 +4,12 @@
 // is open. Also exposes an HTTP endpoint the frontend can call to trigger an
 // immediate capture and get back the current status for display.
 //
-// Captures three kinds of non-production spans from the OFS live feed:
+// Captures non-production spans from the OFS live feed:
 //   - Unplanned downtime  (spanGroup "downtime", downtimeType "UNPLANNED")
 //   - Planned downtime    (spanGroup "downtime", downtimeType "PLANNED")
 //   - Setup / changeover  (state contains "setup")
+//   - Running slow        (state contains "slow" — no reason/category from OFS,
+//                          so it is recorded as "Running Slow")
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -95,13 +97,18 @@ async function fetchSpans(): Promise<OfsSpansData | null> {
   return (await res.json()) as OfsSpansData;
 }
 
-// Dedup key: OFS emits several overlapping spans for the same downtime event
-// (e.g. "job.work.downtime.named" + "shiftStartable") that share the same start
-// epoch and downtime type but have different span IDs. We group by start +
-// type only — NOT reason — because the reason may not be assigned yet when the
-// span first appears, which would cause the same event to be captured twice.
-// When duplicates are found, prefer the more specific span (one with a named
-// reason or a state other than "shiftStartable") over the generic broad span.
+// Dedup key: OFS emits several overlapping spans for the same event (e.g.
+// "job.work.downtime.named" + "shiftStartable", or "running.slow" +
+// "job.work.running.slow") that share the same start epoch and type but have
+// different span IDs. We group by start + type only — NOT reason — because the
+// reason may not be assigned yet when the span first appears, which would
+// cause the same event to be captured twice. When duplicates are found, prefer
+// the more specific span (one with a named reason, a state other than
+// "shiftStartable", or a more specific dotted state like "job.work.*").
+function stateSpecificity(span: OfsSpanItem): number {
+  return (span.state ?? "").split(".").filter((p) => p.length > 0).length;
+}
+
 function dedupeSpans(spans: OfsSpanItem[]): OfsSpanItem[] {
   const byKey = new Map<string, OfsSpanItem>();
   for (const s of spans) {
@@ -122,6 +129,10 @@ function dedupeSpans(spans: OfsSpanItem[]): OfsSpanItem[] {
       const thisIsGeneric = s.state === "shiftStartable" || s.state === "shiftEndable";
       if (existingIsGeneric && !thisIsGeneric) {
         byKey.set(key, s);
+      } else if (existingIsGeneric === thisIsGeneric && stateSpecificity(s) > stateSpecificity(existing)) {
+        // Equal footing — keep the more specific state (e.g. "job.work.running.slow"
+        // over "running.slow").
+        byKey.set(key, s);
       }
     }
   }
@@ -129,9 +140,10 @@ function dedupeSpans(spans: OfsSpanItem[]): OfsSpanItem[] {
 }
 
 // Select the spans we want to record as downtime-style events: planned +
-// unplanned downtime spans (identified by $reason.spanGroup) and setup spans
-// (identified by state containing "setup"). Falls back to the top-level
-// `downtime` field for unplanned downtime when present.
+// unplanned downtime spans (identified by $reason.spanGroup), setup spans
+// (identified by state containing "setup"), and running-slow spans (identified
+// by state containing "slow"). Falls back to the top-level `downtime` field
+// for unplanned downtime when present.
 //
 // OFS keeps every span in the items array with an ever-growing duration, even
 // after the line has moved on to a new state. The line can only be in one
@@ -147,7 +159,8 @@ function extractActiveSpans(spans: OfsSpansData | null): OfsSpanItem[] {
     const reason = item.$reason;
     const isDowntime = reason?.spanGroup === "downtime";
     const isSetup = item.state?.includes("setup") ?? false;
-    if (isDowntime || isSetup) picks.push(item);
+    const isSlow = item.state?.includes("slow") ?? false;
+    if (isDowntime || isSetup || isSlow) picks.push(item);
   }
 
   if (spans.downtime?.id && spans.downtime?.start) {
@@ -167,14 +180,17 @@ function extractActiveSpans(spans: OfsSpansData | null): OfsSpanItem[] {
 }
 
 function spanToEvent(span: OfsSpanItem): Partial<DowntimeEvent> & { id: number } {
-  const reason = span.$reason?.description ?? null;
+  const isSlow = span.state?.includes("slow") ?? false;
+  const reason = span.$reason?.description ?? (isSlow ? "Running Slow" : null);
   const category =
     span.$reason?.$category?.description ??
     span.$reason?.$category?.category ??
     span.$reason?.category?.description ??
     span.$reason?.category?.category ??
-    null;
-  const downtimeType = span.$reason?.downtimeType ?? (span.state?.includes("setup") ? "SETUP" : null);
+    (isSlow ? "Running Slow" : null);
+  const downtimeType =
+    span.$reason?.downtimeType ??
+    (span.state?.includes("setup") ? "SETUP" : isSlow ? "RUNNING_SLOW" : null);
 
   // Setup spans carry no $reason — synthesize a readable label from the order.
   const setupReason = !reason && downtimeType === "SETUP"

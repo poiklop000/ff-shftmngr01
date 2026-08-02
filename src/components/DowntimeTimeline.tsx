@@ -7,6 +7,7 @@ const TYPE_COLORS: Record<string, string> = {
   UNPLANNED: '#dc2626',
   PLANNED: '#2563eb',
   SETUP: '#eab308',
+  RUNNING_SLOW: '#9acd32',
 };
 
 const RUNNING_COLOR = '#16a34a';

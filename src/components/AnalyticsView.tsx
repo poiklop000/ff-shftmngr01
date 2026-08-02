@@ -629,8 +629,8 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
                           <span
                             style={{
                               fontSize: 10, fontWeight: 700, borderRadius: 999, padding: '2px 8px', whiteSpace: 'nowrap',
-                              color: (e.downtime_type ?? '').toUpperCase().includes('SETUP') ? '#854d0e' : '#991b1b',
-                              backgroundColor: (e.downtime_type ?? '').toUpperCase().includes('SETUP') ? '#fef9c3' : '#fee2e2',
+                              color: (e.downtime_type ?? '').toUpperCase().includes('SETUP') ? '#854d0e' : (e.downtime_type ?? '').toUpperCase().includes('RUNNING_SLOW') ? '#3f6212' : '#991b1b',
+                              backgroundColor: (e.downtime_type ?? '').toUpperCase().includes('SETUP') ? '#fef9c3' : (e.downtime_type ?? '').toUpperCase().includes('RUNNING_SLOW') ? '#d9f99d' : '#fee2e2',
                             }}
                           >
                             {e.downtime_type ?? '-'}

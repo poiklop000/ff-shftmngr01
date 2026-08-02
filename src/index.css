@@ -275,7 +275,7 @@ html {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: 52px;
+  bottom: 12px;
   z-index: 50;
   display: flex;
   gap: 0;

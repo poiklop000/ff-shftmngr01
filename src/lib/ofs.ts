@@ -196,10 +196,11 @@ async function fetchOfsRaw(
   }
 }
 
-export type LineStateClass = 'running' | 'setup' | 'downtime' | 'planned' | 'idle';
+export type LineStateClass = 'running' | 'slow' | 'setup' | 'downtime' | 'planned' | 'idle';
 
 export const LINE_STATE_COLORS: Record<LineStateClass, string> = {
   running: '#16a34a',
+  slow: '#9acd32',
   setup: '#eab308',
   downtime: '#dc2626',
   planned: '#2563eb',
@@ -212,11 +213,13 @@ export function classifyLineState(runstate: OfsRunState | undefined): LineStateC
   // "job.setup.running" contains both "setup" and "running", so setup must
   // be checked before running. "unplanned" contains the substring "planned",
   // so it must be checked before "planned" to avoid misclassifying unplanned
-  // downtime as planned (blue instead of red).
+  // downtime as planned (blue instead of red). "running.slow" contains
+  // "running", so slow must be checked before running.
   if (state.includes('setup')) return 'setup';
   if (state.includes('unplanned')) return 'downtime';
   if (state.includes('planned')) return 'planned';
   if (state.includes('downtime')) return 'downtime';
+  if (state.includes('slow')) return 'slow';
   if (state.includes('running')) return 'running';
   if (state.includes('shift') || state.includes('job')) return 'idle';
   return 'idle';

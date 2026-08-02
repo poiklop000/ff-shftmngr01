@@ -343,6 +343,7 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
       <div className="flex flex-wrap items-center gap-3 mb-4 text-[11px] font-semibold">
         {([
           ['running', 'Running'],
+          ['slow', 'Running Slow'],
           ['setup', 'Setup'],
           ['downtime', 'Downtime'],
           ['planned', 'Planned Downtime'],
@@ -509,6 +510,7 @@ function StatusCard({
 }) {
   const tones: Record<string, string> = {
     running: 'border-green-200 bg-green-50 text-green-900',
+    slow: 'border-lime-300 bg-lime-50 text-lime-900',
     setup: 'border-yellow-200 bg-yellow-50 text-yellow-900',
     downtime: 'border-red-200 bg-red-50 text-red-900',
     planned: 'border-blue-200 bg-blue-50 text-blue-900',

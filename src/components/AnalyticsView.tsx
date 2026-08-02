@@ -230,19 +230,6 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
     };
   }, [downtime, data, loadedRange]);
 
-  const downtimeByReason = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const e of downtime) {
-      const key = e.reason ?? e.category ?? 'Unknown';
-      map.set(key, (map.get(key) ?? 0) + (e.duration_ms ?? 0));
-    }
-    return Array.from(map.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8);
-  }, [downtime]);
-
-  const maxReasonMs = downtimeByReason.reduce((m, [, v]) => Math.max(m, v), 0);
-
   const maxHourOut = useMemo(
     () => (data?.hourly ?? []).reduce((m, h) => Math.max(m, h.out), 0),
     [data],
@@ -321,7 +308,6 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
           {
             title: "Charts",
             items: [
-              "Downtime by reason - horizontal bars ranking the top reasons by total time lost.",
               "Output per hour - vertical bars showing how many units each hour produced across the range.",
               "Job progress - one bar per job showing how far it got toward its target quantity.",
             ],
@@ -623,34 +609,6 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
               </div>
             )}
           </div>
-
-          {/* Downtime by reason chart */}
-          {downtimeByReason.length > 0 && (
-            <div className="card card-blue">
-              <h3>Downtime by Reason (top {downtimeByReason.length})</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {downtimeByReason.map(([reason, ms], i) => (
-                  <div key={reason}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, marginBottom: 2 }}>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>{reason}</span>
-                      <span>{formatDuration(ms)}</span>
-                    </div>
-                    <div style={{ width: '100%', height: 12, backgroundColor: '#e2e8f0', borderRadius: 6, overflow: 'hidden' }}>
-                      <div
-                        style={{
-                          width: `${maxReasonMs > 0 ? (ms / maxReasonMs) * 100 : 0}%`,
-                          height: '100%',
-                          backgroundColor: barColor(i),
-                          borderRadius: 6,
-                          transition: 'width 0.3s ease',
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Hourly production */}
           <div className="card card-green">

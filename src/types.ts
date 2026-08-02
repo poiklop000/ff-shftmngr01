@@ -259,7 +259,7 @@ export function formatTime(totalMinutes: number): string {
 export function generateHours(startStr: string, endStr: string, intervalMinutes: number): string[] {
   const [sh, sm] = startStr.split(':').map(Number);
   const [eh, em] = endStr.split(':').map(Number);
-  let start = sh * 60 + sm;
+  const start = sh * 60 + sm;
   let end = eh * 60 + em;
   if (end <= start) end += 1440;
   const result: string[] = [];

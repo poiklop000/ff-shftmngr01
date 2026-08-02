@@ -3,7 +3,6 @@ import {
   Activity,
   AlertTriangle,
   Boxes,
-  Calendar,
   Clock,
   Gauge,
   Loader2,
@@ -21,14 +20,6 @@ import { PageHelp } from '@/components/PageHelp';
 
 const REFRESH_MS = 1000;
 const SUMMARY_REFRESH_MS = 30000;
-
-function todayStr(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
 
 function dateToStr(d: Date): string {
   const y = d.getFullYear();
@@ -547,15 +538,6 @@ function Field({ label, value }: { label: string; value: string }) {
       <div className="text-[14px] font-bold">{value}</div>
     </div>
   );
-}
-
-function formatDuration(minutes: number): string {
-  if (!isFinite(minutes) || minutes <= 0) return '00:00:00';
-  const total = Math.round(minutes * 60);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
 function formatEstFinish(remaining: number, speedPerHour: number, timezone?: string): string {

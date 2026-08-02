@@ -12,7 +12,7 @@ interface PageHelpProps {
   sections: HelpSection[];
 }
 
-export function PageHelp({ title, intro, sections }: PageHelpProps) {
+export function PageHelp({ intro, sections }: PageHelpProps) {
   const [open, setOpen] = useState(false);
 
   return (

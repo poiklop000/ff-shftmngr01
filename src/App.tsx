@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Calculator, ClipboardList, Activity, TimerOff, Settings, Calendar, Clock } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Calculator, ClipboardList, Activity, TimerOff, Settings, Calendar, Clock, BarChart3 } from 'lucide-react';
+import { AnalyticsView } from '@/components/AnalyticsView';
 import { CalculatorView } from '@/components/CalculatorView';
 import { DowntimeHistory } from '@/components/DowntimeHistory';
 import { LiveLineStatus } from '@/components/LiveLineStatus';
@@ -9,7 +10,6 @@ import {
   computeHourlyOutputs,
   computeDowntimeLogs,
   createEmptyShiftData,
-  createEmptyAppData,
   generateHours,
   getActiveHours,
   getDefaultRowCount,
@@ -22,7 +22,6 @@ import {
   type CalcInputs,
   type CustomConfig,
   type Shift,
-  type ShiftDb,
   type ShiftRow,
   type ToggleState,
 } from '@/types';
@@ -31,9 +30,9 @@ import { fetchDowntimeByDate } from '@/lib/downtime';
 import { saveMonitoringRecord, loadMonitoringRecord, buildActiveJobSnapshot, type ActiveJobSnapshot } from '@/lib/monitoring';
 import { fetchOfsStatus } from '@/lib/ofs';
 
-type View = 'calculator' | 'tracker' | 'live' | 'downtime';
+type View = 'calculator' | 'tracker' | 'live' | 'downtime' | 'analytics';
 const VIEW_KEY = 'canning_calc_view';
-const VALID_VIEWS: View[] = ['calculator', 'tracker', 'live', 'downtime'];
+const VALID_VIEWS: View[] = ['calculator', 'tracker', 'live', 'downtime', 'analytics'];
 
 // Deep-clone the data for an immutable update, but keep the customHours array
 // reference stable. Without this, every edit gives customHours a new identity,
@@ -270,6 +269,27 @@ export default function App() {
       return next;
     });
   }, [data.date, data.shift]);
+
+  // Analytics: open a saved record from the records list — loads it onto the
+  // monitoring board and switches to the Monitoring tab.
+  const handleOpenRecordFromAnalytics = useCallback(async (recordDate: string, shiftName: string) => {
+    const shift = SHIFT_LIST.includes(shiftName as Shift) ? (shiftName as Shift) : 'Custom';
+    const record = await loadMonitoringRecord(recordDate, shift);
+    if (!record) {
+      throw new Error(`No saved record found for ${shift} on ${recordDate}.`);
+    }
+    setData((prev) => {
+      const next = cloneData(prev);
+      next.date = recordDate;
+      next.shift = shift;
+      next.db[shift] = record.board_data;
+      next.notes[shift] = record.notes ?? '';
+      next.sku[shift] = record.sku ?? '';
+      next.db[shift].date = record.record_date;
+      return next;
+    });
+    setView('tracker');
+  }, []);
 
   const handleExportReport = useCallback(() => {
     const dateStr = data.date || '';
@@ -517,6 +537,8 @@ function epochToConsoleTime(
             currentShift={data.shift}
             customHours={data.customHours}
           />
+        ) : view === 'analytics' ? (
+          <AnalyticsView onOpenRecord={handleOpenRecordFromAnalytics} />
         ) : (
           <MonitoringView
             db={data.db}
@@ -545,12 +567,13 @@ function epochToConsoleTime(
       </div>
 
       <nav className={`bottom-tab-bar${keyboardOpen ? ' bottom-tab-bar-hidden' : ''}`} aria-label="Section navigation" aria-hidden={keyboardOpen}>
-        <span className="bottom-tab-indicator" style={{ ['--i' as string]: String(((['live','tracker','downtime','calculator'] as const).indexOf(view))) }} aria-hidden="true" />
+        <span className="bottom-tab-indicator" style={{ ['--i' as string]: String(((['live','tracker','downtime','calculator','analytics'] as const).indexOf(view))) }} aria-hidden="true" />
         {([
           { id: 'live', label: 'Live', Icon: Activity },
           { id: 'tracker', label: 'Monitoring', Icon: ClipboardList },
           { id: 'downtime', label: 'Downtime', Icon: TimerOff },
           { id: 'calculator', label: 'Calculator', Icon: Calculator },
+          { id: 'analytics', label: 'Analytics', Icon: BarChart3 },
         ] as const).map(({ id, label, Icon }) => (
           <button
             key={id}

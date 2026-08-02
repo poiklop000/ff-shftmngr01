@@ -110,22 +110,22 @@ export function DowntimeHistory({
           {
             title: "Searching for events",
             items: [
-              "Pick a date using the date picker, or use the Today or Yesterday buttons as shortcuts.",
-              "Click Search to load downtime events for that date and the currently selected shift.",
-              "Click Refresh from OFS to pull the latest data directly from OFS.",
+              "Pick a date with the date picker at the top of the page. Events load automatically for the current date.",
+              "Click Search to reload the downtime events for that date and the currently selected shift.",
+              "Click Refresh from OFS to pull the latest events again.",
             ],
           },
           {
             title: "Reading the summary cards",
             items: [
-              "Total downtime shows the combined minutes lost across all events for the selected shift.",
-              "Events resolved shows how many downtime events have ended vs. still ongoing.",
+              "Total Downtime shows the combined time lost across all events for the selected shift.",
+              "Resolved Events shows how many downtime events have ended vs. still ongoing.",
             ],
           },
           {
             title: "Reading the event table",
             items: [
-              "Each row is one downtime event, showing start time, category, reason, type (unplanned, planned, or setup), crew, duration, and status (ongoing or resolved).",
+              "Each row is one downtime event, showing start time, category, reason, type (unplanned, planned, or setup), crew, duration, and status (Ongoing or Resolved).",
               "If an event has operator comments, a speech-bubble icon appears next to it. Click the row to expand and read the comments.",
               "Click the row again to collapse the comments.",
             ],

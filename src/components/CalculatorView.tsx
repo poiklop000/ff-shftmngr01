@@ -86,19 +86,20 @@ export function CalculatorView({ calc, onChange, onUpdate, onClear }: Calculator
             title: "Filling in the inputs",
             items: [
               "Product - type the product name for the current run.",
-              "Can Size - pick the package size for this product.",
+              "Can Size - pick the package size in litres (0.250, 0.330, 0.355, 0.440, or 0.500).",
               "Total Plan - the total quantity you plan to produce this run.",
               "Filler Speed - the rated speed of the filler in cans per hour.",
-              "Upstream Volume, Mixer Volume, Mixing Ratio, Filler Bowl Level - enter the remaining syrup and mixing details. These determine how many cans can still be produced.",
+              "Upstream Volume (Final Syrup), Mixer Volume (ContiFlow KB), Mixing Ratio %, and Filler bowl level - enter the remaining syrup and mixing details. These determine how many cans can still be produced.",
               "Filler Production Counter - the current cumulative counter reading from the filler.",
-              "Cans per layer and Layers per pallet - used to estimate remaining pallets and depal layers.",
+              "Cans per layer and Layers per pallet - used to estimate the remaining pallets and depal layers.",
             ],
           },
           {
             title: "Reading the results",
             items: [
-              "Production Summary card shows your running yield percentage (green if 97% or above, red if below), estimated final count, and estimated finish time.",
-              "End Production card shows how many cans are still left to produce based on remaining syrup, plus how many pallets and depal layers that translates to.",
+              "Production Summary shows the product, running yield percentage (green at 97% or above, red below), estimated final count, and estimated finish time.",
+              "End Production (Based on remaining Syrup left) shows how many cans are still left to produce based on the remaining syrup, plus the estimated pallets left and estimated layers left.",
+              "Results only recalculate when you press Update.",
             ],
           },
           {

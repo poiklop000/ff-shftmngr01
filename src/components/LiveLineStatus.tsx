@@ -202,23 +202,24 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
           {
             title: "Top section - live line status",
             items: [
-              "Current line state shows whether the line is running, in setup, down, or planned.",
-              "Production rate shows the current cans per hour.",
-              "State time shows how long the line has been in its current state (running, setup, downtime, or planned downtime), colour-coded to match.",
-              "Use the Auto-refresh toggle to turn the automatic 1-second refresh on or off.",
+              "Line State shows whether the line is running, in setup, down, or planned, colour-coded to match.",
+              "Current Rate shows the current throughput in cans per hour, with the rated speed shown underneath when available.",
+              "State Time shows how long the line has been in its current state.",
+              "Auto-refresh is on by default and updates every second. Toggle it off to pause, or use the Refresh button to load once.",
+              "If the data can't load, check that the OFS credentials are configured as Supabase secrets.",
             ],
           },
           {
             title: "Active job card",
             items: [
-              "Shows the current product, SKU, target quantity, and rated speed.",
-              "The progress bar shows how far through the job you are, with an estimated finish time.",
+              "Shows the current product, SKU, target quantity, and rated speed for the running job.",
+              "The progress bar shows how far through the job you are (produced vs target), the remaining quantity, and an estimated finish time based on the current or rated speed.",
             ],
           },
           {
             title: "Shift timeline",
             items: [
-              "The bar shows downtime events as they happen, colour-coded: red for unplanned, blue for planned, yellow for setup.",
+              "The bar shows downtime events across the shift, colour-coded: red for unplanned, blue for planned, yellow for setup.",
               "A dark vertical line marks the current time within the shift.",
               "The green portion shows how far through the shift you are.",
             ],
@@ -226,16 +227,16 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
           {
             title: "Shift counts and process counters",
             items: [
-              "Shift counts show throughput and output totals for the current shift.",
-              "Process counters show units in and units out in real time.",
+              "Shift Counts shows the current crew and operator, plus the shift's throughput and output totals.",
+              "Live Process Counters show units in (filler) and units out (date coder) in real time, along with the active job's produced and throughput totals.",
             ],
           },
           {
             title: "Hourly production summary",
             items: [
-              "The table at the bottom shows per-hour throughput for the selected shift and date.",
-              "Use the date picker to look at a different day.",
-              "The summary updates automatically as new readings come in.",
+              "The table at the bottom shows per-hour In (throughput) and Out (output) for the selected shift and date, with a total row.",
+              "Use the date picker at the top of the page to look at a different day.",
+              "The summary loads once a date is chosen and refreshes automatically. Use its Refresh button to reload it at any time.",
             ],
           },
         ]}

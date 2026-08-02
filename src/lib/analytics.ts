@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { withTimeout } from '@/lib/ui';
 import { listMonitoringRecords, type MonitoringRecord } from '@/lib/monitoring';
+import { localDateTimeToEpoch } from '@/lib/downtime';
 
 const DB_TIMEOUT_MS = 15000;
 
@@ -19,32 +20,17 @@ export interface JobSnapshotRow {
   shift_name: string | null;
 }
 
-// Convert a YYYY-MM-DD factory date to the epoch of local Auckland midnight,
-// so date-range queries on UTC timestamps line up with the console calendar.
-function aucklandMidnightEpoch(dateStr: string): number {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const utcMidnight = Date.UTC(y, m - 1, d, 0, 0, 0);
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Pacific/Auckland',
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hour12: false,
-  }).formatToParts(new Date(utcMidnight));
-  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
-  const offsetHours = hour === 24 ? 0 : hour;
-  return utcMidnight - offsetHours * 3600_000;
-}
-
 /**
- * Fetches job snapshots captured between the given factory dates
- * (inclusive). Dates are YYYY-MM-DD. Rows are returned oldest-first.
+ * Fetches job snapshots captured between the given factory-local date/times
+ * ("YYYY-MM-DDTHH:mm" strings, inclusive start, exclusive end). Rows are
+ * returned oldest-first.
  */
 export async function fetchJobsInRange(
-  startDate: string,
-  endDate: string,
+  startAt: string,
+  endAt: string,
 ): Promise<JobSnapshotRow[]> {
-  const startIso = new Date(aucklandMidnightEpoch(startDate)).toISOString();
-  const endIso = new Date(aucklandMidnightEpoch(endDate) + 24 * 3600_000).toISOString();
+  const startIso = new Date(localDateTimeToEpoch(startAt)).toISOString();
+  const endIso = new Date(localDateTimeToEpoch(endAt)).toISOString();
 
   const { data, error } = await withTimeout(
     supabase

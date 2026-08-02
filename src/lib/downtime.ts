@@ -180,6 +180,32 @@ function dateToEpochRange(dateStr: string): { start: number; end: number } {
   return { start: aucklandMidnightEpoch, end: aucklandEndOfDayEpoch };
 }
 
+// Convert a factory-local wall clock time ("YYYY-MM-DDTHH:mm", Pacific/Auckland)
+// to its UTC epoch in ms. Handles the timezone offset via Intl, so the browser's
+// own timezone does not shift the result.
+export function localDateTimeToEpoch(dt: string): number {
+  const [datePart, timePart = '00:00'] = dt.split('T');
+  if (!datePart) return NaN;
+  const [y, m, d] = datePart.split('-').map(Number);
+  const [hh, mm] = timePart.split(':').map(Number);
+  const naiveUtc = Date.UTC(y, m - 1, d, hh || 0, mm || 0, 0);
+  if (Number.isNaN(naiveUtc)) return NaN;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Pacific/Auckland',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(new Date(naiveUtc));
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '0';
+  const wallY = Number(get('year'));
+  const wallM = Number(get('month'));
+  const wallD = Number(get('day'));
+  const wallH = get('hour') === '24' ? 0 : Number(get('hour'));
+  const wallMin = Number(get('minute'));
+  const aucklandAsUtc = Date.UTC(wallY, wallM - 1, wallD, wallH, wallMin, 0);
+  const offsetMin = (aucklandAsUtc - naiveUtc) / 60000;
+  return naiveUtc - offsetMin * 60000;
+}
+
 function parts_find(parts: Intl.DateTimeFormatPart[], type: string): string {
   return parts.find((p) => p.type === type)?.value ?? '0';
 }
@@ -202,21 +228,39 @@ export async function fetchDowntimeByDate(
 ): Promise<DowntimeEvent[]> {
   const rangeStart = dateToEpochRange(startDate).start;
   const rangeEnd = dateToEpochRange(endDate ?? startDate).end;
+  return fetchDowntimeBetweenEpochs(rangeStart, rangeEnd);
+}
 
-  const [spans, setupEvents] = await Promise.all([
+/**
+ * Fetches downtime events for a precise factory-local time range
+ * ("YYYY-MM-DDTHH:mm" strings). Combines OFS express spans with captured
+ * setup/running-slow events from the Supabase downtime_events table.
+ */
+export async function fetchDowntimeBetween(
+  startAt: string,
+  endAt: string,
+): Promise<DowntimeEvent[]> {
+  return fetchDowntimeBetweenEpochs(localDateTimeToEpoch(startAt), localDateTimeToEpoch(endAt));
+}
+
+async function fetchDowntimeBetweenEpochs(
+  rangeStart: number,
+  rangeEnd: number,
+): Promise<DowntimeEvent[]> {
+  const [spans, dbEvents] = await Promise.all([
     fetchExpressSpans(),
-    fetchSetupEventsFromDb(rangeStart, rangeEnd),
+    fetchDbEventsInEpochRange(rangeStart, rangeEnd),
   ]);
 
   const downtimeEvents = spans
     .filter((s) => s.start >= rangeStart && s.start <= rangeEnd)
     .map(spanToEvent);
 
-  return [...downtimeEvents, ...setupEvents]
+  return [...downtimeEvents, ...dbEvents]
     .sort((a, b) => b.start_epoch - a.start_epoch);
 }
 
-async function fetchSetupEventsFromDb(
+async function fetchDbEventsInEpochRange(
   rangeStart: number,
   rangeEnd: number,
 ): Promise<DowntimeEvent[]> {

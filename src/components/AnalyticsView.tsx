@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import { BarChart3, Loader2, FileDown, ExternalLink, RefreshCw, Calendar, Clock } from 'lucide-react';
 import { PageHelp } from '@/components/PageHelp';
-import { SHIFT_LIST, type Shift } from '@/types';
-import { fetchDowntimeByDate, formatDuration, type DowntimeEvent } from '@/lib/downtime';
+import type { Shift } from '@/types';
+import { fetchDowntimeBetween, formatDuration, localDateTimeToEpoch, type DowntimeEvent } from '@/lib/downtime';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
 import {
   fetchJobsInRange,
@@ -81,9 +81,8 @@ interface AnalyticsViewProps {
 }
 
 export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
-  const [startDate, setStartDate] = useState(dateOffset(-6));
-  const [endDate, setEndDate] = useState(dateOffset(0));
-  const [shiftFilter, setShiftFilter] = useState('All');
+  const [startAt, setStartAt] = useState(() => `${dateOffset(-6)}T00:00`);
+  const [endAt, setEndAt] = useState(() => `${dateOffset(0)}T23:59`);
   const [textFilter, setTextFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('All');
   const [loading, setLoading] = useState(false);
@@ -94,23 +93,32 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
 
   const loadData = useCallback(async (start: string, end: string) => {
     if (!start || !end) {
-      setError('Select both a start and an end date.');
+      setError('Select both a start and an end date and time.');
       return;
     }
     if (start > end) {
-      setError('Start date cannot be after the end date.');
+      setError('Start cannot be after the end.');
+      return;
+    }
+    const sEpoch = localDateTimeToEpoch(start);
+    const eEpoch = localDateTimeToEpoch(end);
+    if (Number.isNaN(sEpoch) || Number.isNaN(eEpoch)) {
+      setError('Enter valid start and end date/times.');
       return;
     }
     setLoading(true);
     setError(null);
     setMsg(null);
     try {
-      const [jobs, downtime, hourly, records] = await Promise.all([
+      const startDay = start.slice(0, 10);
+      const endDay = end.slice(0, 10);
+      const [jobs, downtime, hourlyAll, records] = await Promise.all([
         fetchJobsInRange(start, end),
-        fetchDowntimeByDate(start, end),
-        fetchHourlySummaryByDate(start, end),
-        fetchMonitoringRecordsInRange(start, end),
+        fetchDowntimeBetween(start, end),
+        fetchHourlySummaryByDate(startDay, endDay),
+        fetchMonitoringRecordsInRange(startDay, endDay),
       ]);
+      const hourly = hourlyAll.filter((h) => h.start >= sEpoch && h.start <= eEpoch);
       setData({ jobs, downtime, hourly, records });
       setLoadedRange({ start, end });
     } catch (err) {
@@ -123,22 +131,12 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
   }, []);
 
   const handleQuick = (days: number) => {
-    const s = dateOffset(days > 0 ? -days + 1 : 0);
-    const e = dateOffset(0);
-    setStartDate(s);
-    setEndDate(e);
-    loadData(s, e);
+    const st = `${dateOffset(days > 0 ? -days + 1 : 0)}T00:00`;
+    const en = `${dateOffset(0)}T23:59`;
+    setStartAt(st);
+    setEndAt(en);
+    loadData(st, en);
   };
-
-  // Distinct shift labels across all data sources for the shift filter.
-  const shiftOptions = useMemo(() => {
-    if (!data) return SHIFT_LIST;
-    const set = new Set<string>(SHIFT_LIST);
-    for (const j of data.jobs) if (j.shift_name) set.add(j.shift_name);
-    for (const r of data.records) set.add(r.shift_name);
-    for (const e of data.downtime) if (e.crew_name) set.add(e.crew_name);
-    return Array.from(set);
-  }, [data]);
 
   // Group job snapshots into one row per distinct OFS job.
   const jobs = useMemo(() => {
@@ -163,7 +161,6 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
       runs: number;
     }[] = [];
     for (const [jobId, { rows }] of map) {
-      if (shiftFilter !== 'All' && !rows.some((r) => r.shift_name === shiftFilter)) continue;
       const last = rows[rows.length - 1]!;
       const first = rows[0]!;
       const shifts = Array.from(new Set(rows.map((r) => r.shift_name).filter(Boolean))) as string[];
@@ -182,14 +179,11 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
     }
     list.sort((a, b) => a.jobId - b.jobId);
     return list;
-  }, [data, shiftFilter]);
+  }, [data]);
 
   const downtime = useMemo(() => {
     if (!data) return [];
     let list = data.downtime;
-    if (shiftFilter !== 'All') {
-      list = list.filter((e) => e.crew_name === shiftFilter);
-    }
     if (typeFilter !== 'All') {
       list = list.filter((e) => (e.downtime_type ?? '') === typeFilter);
     }
@@ -202,18 +196,14 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
       );
     }
     return list;
-  }, [data, shiftFilter, typeFilter, textFilter]);
+  }, [data, typeFilter, textFilter]);
 
   const downtimeTypes = useMemo(() => {
     if (!data) return [];
     return Array.from(new Set(data.downtime.map((e) => e.downtime_type).filter(Boolean))) as string[];
   }, [data]);
 
-  const records = useMemo(() => {
-    if (!data) return [];
-    if (shiftFilter === 'All') return data.records;
-    return data.records.filter((r) => r.shift_name === shiftFilter);
-  }, [data, shiftFilter]);
+  const records = useMemo(() => (data ? data.records : []), [data]);
 
   const { totalDowntimeMs, downtimeCount, longestDowntimeMs, uptimePct, totalOut, avgEfficiency } = useMemo(() => {
     const totalDowntimeMs = downtime.reduce((sum, e) => sum + (e.duration_ms ?? 0), 0);
@@ -315,15 +305,15 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
           {
             title: "Selecting a range",
             items: [
-              "Choose a start and end date, then click Load Data. Quick buttons (Today, 7 Days, 14 Days, 30 Days) set common ranges instantly.",
-              "The range uses the factory console calendar, so overnight shifts and UTC timestamps are aligned to the line's local date.",
+              "Choose a start and end date and time, then click Load Data. Quick buttons (Today, 7 Days, 14 Days, 30 Days) set common ranges instantly.",
+              "The range uses the factory console clock, so overnight shifts and UTC timestamps are aligned to the line's local date and time.",
+              "The selected date/time window applies to jobs, downtime events, hourly production, and saved records.",
             ],
           },
           {
             title: "Filtering",
             items: [
-              "Shift - narrows the jobs and saved records lists to one shift, and downtime to events logged by that crew.",
-              "Type - on the downtime table, filter to unplanned, planned, or setup events.",
+              "Type - on the downtime table, filter to unplanned, planned, setup, or running-slow events.",
               "Search - type text to find downtime reasons or categories containing that text.",
             ],
           },
@@ -363,25 +353,25 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
             <Calendar size={14} />
             <span style={{ fontSize: 12, fontWeight: 700 }}>From</span>
             <input
-              type="date"
+              type="datetime-local"
               className="card-date-input"
-              value={startDate}
-              max={endDate}
-              onChange={(e) => setStartDate(e.target.value)}
+              value={startAt}
+              max={endAt}
+              onChange={(e) => setStartAt(e.target.value)}
             />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Clock size={14} />
             <span style={{ fontSize: 12, fontWeight: 700 }}>To</span>
             <input
-              type="date"
+              type="datetime-local"
               className="card-date-input"
-              value={endDate}
-              max={dateOffset(0)}
-              onChange={(e) => setEndDate(e.target.value)}
+              value={endAt}
+              min={startAt}
+              onChange={(e) => setEndAt(e.target.value)}
             />
           </div>
-          <button type="button" className="tab-btn tab-btn-blue" onClick={() => loadData(startDate, endDate)} disabled={isLoading}>
+          <button type="button" className="tab-btn tab-btn-blue" onClick={() => loadData(startAt, endAt)} disabled={isLoading}>
             {isLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             Load Data
           </button>
@@ -398,21 +388,11 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
               {q.label}
             </button>
           ))}
-          <select
-            className="app-bar-shift-select"
-            style={{ width: 'auto' }}
-            value={shiftFilter}
-            onChange={(e) => setShiftFilter(e.target.value)}
-          >
-            {shiftOptions.map((s) => (
-              <option key={s} value={s}>{s === 'All' ? 'All Shifts' : s}</option>
-            ))}
-          </select>
         </div>
 
         {loadedRange && (
           <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: '#1e40af' }}>
-            Showing {loadedRange.start} to {loadedRange.end}
+            Showing {loadedRange.start.replace('T', ' ')} to {loadedRange.end.replace('T', ' ')}
           </div>
         )}
       </div>

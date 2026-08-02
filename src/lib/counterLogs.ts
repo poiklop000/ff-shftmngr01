@@ -2,6 +2,7 @@ import { fetchHourlySummary, type OfsHourSummaryItem } from '@/lib/ofs';
 import type { CounterLogEntry } from '@/types';
 
 export interface HourlySummaryEntry {
+  start: number;
   hour: string;
   in: number;
   out: number;
@@ -24,6 +25,7 @@ export async function fetchHourlySummaryByDate(
     const counts = extractCounts(item);
     const hourLabel = item.startText?.slice(11, 16) ?? '--:--';
     return {
+      start: item.start,
       hour: hourLabel,
       in: counts.through,
       out: counts.out,

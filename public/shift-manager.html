@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shift Manager Console Beta V2.00</title>
+    <link rel="preconnect" href="https://googleapis.com">
+    <link rel="preconnect" href="https://gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+
+        body { font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; color: #1e293b; -webkit-font-smoothing: antialiased; }
+        .app-bar { background-color: #0d47a1; color: white; padding: 15px; font-size: 16px; font-weight: 700; text-align: center; letter-spacing: 0.5px; text-transform: uppercase; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .tab-container { display: flex; justify-content: center; background-color: #e2e8f0; padding: 8px; gap: 10px; }
+        .tab-btn { background-color: #f1f5f9; border: none; padding: 10px 20px; border-radius: 6px; font-size: 13px; font-weight: 700; cursor: pointer; color: #334155; transition: all 0.2s; font-family: inherit; }
+        .tab-btn.active { background-color: #0d47a1; color: white; }
+        .container { max-width: 1200px; margin: 20px auto; padding: 0 15px; box-sizing: border-box; }
+
+        .card { border-radius: 8px; padding: 15px; margin-bottom: 15px; border: 1px solid #cbd5e1; box-sizing: border-box; }
+        .card-blue { background-color: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+        .card-green { background-color: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+        .card-teal { background-color: #f0fdfa; border-color: #99f6e4; color: #115e59; }
+        .card h3 { margin-top: 0; margin-bottom: 12px; border-bottom: 1px solid currentColor; padding-bottom: 6px; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; }
+        .card-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; font-weight: 500; align-items: center; }
+        .card-value { font-weight: bold; font-size: 14px; }
+
+        .section-panel { background-color: #f1f5f9; padding: 15px; border-radius: 8px; margin-bottom: 15px; display: flex; flex-direction: column; gap: 12px; align-items: center; }
+        .input-group { display: flex; flex-direction: column; width: 100%; max-width: 300px; gap: 4px; }
+        .input-group label { font-size: 11px; font-weight: 700; color: #1e3a8a; text-transform: uppercase; letter-spacing: 0.3px; }
+        .form-control { width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; font-weight: 600; color: #0f172a; box-sizing: border-box; font-family: inherit; }
+        .form-control:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.2); }
+
+        .table-wrapper { width: 100%; overflow-x: auto; background-color: white; border-radius: 8px; border: 1px solid #cbd5e1; }
+        table { width: 100%; border-collapse: collapse; min-width: 1150px; }
+        th { background-color: #f1f5f9; color: #0d47a1; padding: 12px 8px; font-size: 11px; font-weight: 700; text-align: center; border-bottom: 2px solid #0d47a1; letter-spacing: 0.3px; text-transform: uppercase; }
+        td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; text-align: center; vertical-align: middle; }
+
+        .table-input { width: 90px; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; text-align: center; font-size: 13px; font-weight: 600; color: #0f172a; font-family: inherit; box-sizing: border-box; }
+        .table-text-area { width: 350px; min-height: 28px; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 11px; font-weight: 500; color: #334155; box-sizing: border-box; font-family: inherit; resize: none; overflow: hidden; display: block; line-height: 1.4; text-align: left; }
+
+        /* SKUs textarea styling */
+        .sku-textarea { width: 100%; max-width: 400px; min-height: 28px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; font-weight: 500; color: #0f172a; text-align: left; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; resize: none; overflow: hidden; display: block; line-height: 1.4; box-sizing: border-box; background-color: #f8fafc; }
+
+        /* Custom interval panel */
+        .custom-interval-panel { display: none; justify-content: center; gap: 12px; margin-bottom: 15px; align-items: center; flex-wrap: wrap; background-color: #eff6ff; padding: 12px; border-radius: 8px; border: 1px solid #bfdbfe; }
+        .custom-interval-panel label { font-size: 11px; font-weight: 700; color: #1e3a8a; text-transform: uppercase; letter-spacing: 0.3px; }
+        .custom-interval-panel input[type="time"], .custom-interval-panel select { padding: 6px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; font-weight: 600; color: #0f172a; font-family: inherit; }
+
+        /* === PRINT-ONLY SHADOW LAYERS === */
+        .print-notes-layer { display: none !important; }
+        .print-shadow-layer { display: none !important; }
+        .print-sku-layer { display: none !important; }
+
+        .oee-badge { font-weight: 700; font-size: 13px; color: #94a3b8; font-family: inherit; }
+        .oee-badge.oee-pass { color: #166534; }
+        .oee-badge.oee-fail { color: #b91c1c; }
+        .oee-badge.oee-neutral { color: #94a3b8; }
+
+        .toggle-btn { background: none; border: none; font-size: 12px; cursor: pointer; padding: 0; border-radius: 50%; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; transition: all 0.15s; font-family: inherit; }
+        .toggle-btn.neutral { color: #94a3b8; background-color: #f1f5f9; border: 1px solid #cbd5e1; }
+        .toggle-btn.pass { color: white; background-color: #166534; border: 1px solid #166534; }
+        .toggle-btn.issue { color: white; background-color: #b91c1c; border: 1px solid #b91c1c; }
+
+        .footer { text-align: center; padding: 20px; color: #64748b; font-size: 11px; font-weight: 500; letter-spacing: 0.2px; }
+        .footer strong { color: #0d47a1; font-style: italic; font-weight: 700; }
+        .yield-red { color: #b91c1c !important; font-weight: 700; }
+        .yield-green { color: #166534 !important; font-weight: 700; }
+
+        .yield-input-red { color: #b91c1c !important; font-weight: 700 !important; }
+        .yield-input-green { color: #166534 !important; font-weight: 700 !important; }
+
+        @media print {
+            @page { size: landscape; margin: 0.4in; }
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            html, body { background-color: white !important; color: black !important; }
+            body { font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; margin: 0 !important; padding: 0 !important; -webkit-font-smoothing: antialiased !important; }
+            .app-bar, .tab-container, .tab-btn, .footer, .custom-interval-panel, button:not(.toggle-btn) { display: none !important; }
+            .container { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
+
+            .card, .table-wrapper { page-break-inside: auto !important; }
+
+            .card { border: 1px solid #cbd5e1 !important; margin-bottom: 15px !important; padding: 12px !important; }
+            .card-blue { background-color: #eff6ff !important; color: #1e40af !important; }
+            .card-green { background-color: #f0fdf4 !important; color: #166534 !important; }
+            .card-teal { background-color: #f0fdfa !important; color: #115e59 !important; }
+            .card h3 { font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; font-weight: 700 !important; font-size: 14px !important; margin: 0 0 12px 0 !important; border-bottom: 1px solid currentColor !important; padding-bottom: 6px !important; text-transform: uppercase !important; letter-spacing: 0.3px !important; }
+            .card-row { display: flex !important; justify-content: space-between !important; margin-bottom: 8px !important; font-size: 13px !important; font-weight: 500 !important; align-items: center !important; }
+            .card-date-input { border: none !important; background: transparent !important; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; font-size: 13px !important; font-weight: 700 !important; color: #1e40af !important; width: auto !important; }
+
+            .table-wrapper { border: none !important; overflow: visible !important; width: 100% !important; background-color: white !important; }
+            table { width: 100% !important; border-collapse: collapse !important; table-layout: fixed !important; page-break-inside: auto !important; }
+            thead { display: table-header-group !important; }
+            thead tr { display: table-row !important; page-break-inside: avoid !important; page-break-after: auto !important; }
+            tr { page-break-inside: avoid !important; page-break-after: auto !important; }
+
+            th:nth-child(1), td:nth-child(1) { width: 110px !important; text-align: left !important; }
+            th:nth-child(2), td:nth-child(2) { width: 95px !important; }
+            th:nth-child(3), td:nth-child(3) { width: 105px !important; }
+            th:nth-child(4), td:nth-child(4) { width: 75px !important; }
+            th:nth-child(5), td:nth-child(5) { width: 65px !important; }
+            th:nth-child(6), td:nth-child(6) { width: 65px !important; }
+            th:nth-child(7), td:nth-child(7) { width: 340px !important; }
+            th:nth-child(8), td:nth-child(8) { width: 95px !important; }
+            th:nth-child(9), td:nth-child(9) { width: 85px !important; }
+
+            th { background-color: #f1f5f9 !important; color: #0d47a1 !important; padding: 10px 8px !important; font-size: 11px !important; font-weight: 700 !important; text-align: center !important; border-bottom: 2px solid #0d47a1 !important; letter-spacing: 0.3px !important; text-transform: uppercase !important; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; }
+            td { padding: 6px 8px !important; border-bottom: 1px solid #e2e8f0 !important; text-align: center !important; vertical-align: middle !important; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; font-size: 13px !important; font-weight: 500 !important; color: #0f172a !important; }
+
+            .table-input { border: none !important; background: transparent !important; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; font-size: 13px !important; font-weight: 600 !important; color: #0f172a !important; width: 100% !important; text-align: center !important; padding: 6px 8px !important; }
+            .table-input.yield-input-red { color: #b91c1c !important; }
+            .table-input.yield-input-green { color: #166534 !important; }
+            .table-text-area { display: none !important; }
+
+            .sku-textarea { display: none !important; }
+
+            .print-shadow-layer { display: block !important; width: 100% !important; text-align: left !important; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; font-size: 11px !important; font-weight: 500 !important; color: #334155 !important; line-height: 1.4 !important; white-space: pre-wrap !important; word-wrap: break-word !important; padding: 6px 8px !important; box-sizing: border-box !important; }
+
+            .print-notes-layer { display: block !important; width: 100% !important; text-align: left !important; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; font-size: 13px !important; font-weight: 500 !important; color: #0f172a !important; line-height: 1.4 !important; white-space: pre-wrap !important; word-wrap: break-word !important; padding: 6px 0 !important; box-sizing: border-box !important; }
+
+            .print-sku-layer { display: block !important; width: 100% !important; text-align: left !important; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; font-size: 13px !important; font-weight: 500 !important; color: #1e40af !important; line-height: 1.4 !important; white-space: pre-wrap !important; word-wrap: break-word !important; padding: 6px 0 !important; box-sizing: border-box !important; }
+
+            #lbl-total-output { font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; font-weight: bold !important; font-size: 14px !important; color: #166534 !important; }
+            #lbl-avg-oee { font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; font-weight: bold !important; font-size: 14px !important; color: #115e59 !important; }
+            #lbl-total-output-inside { font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; font-weight: bold !important; font-size: 14px !important; color: #166534 !important; }
+            #lbl-avg-oee-inside { font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; font-weight: bold !important; font-size: 14px !important; color: #115e59 !important; }
+
+            #tx-notes { display: none !important; }
+            #tx-sku { display: none !important; }
+
+            .toggle-btn { display: inline-flex !important; border: 1px solid #cbd5e1 !important; font-size: 12px !important; width: 24px !important; height: 24px !important; border-radius: 50% !important; align-items: center !important; justify-content: center !important; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; font-weight: 700 !important; }
+            .toggle-btn.neutral { color: #94a3b8 !important; background-color: #f1f5f9 !important; border: 1px solid #cbd5e1 !important; }
+            .toggle-btn.pass { color: white !important; background-color: #166534 !important; border: 1px solid #166534 !important; }
+            .toggle-btn.issue { color: white !important; background-color: #b91c1c !important; border: 1px solid #b91c1c !important; }
+
+            .oee-badge { font-weight: 700 !important; font-size: 13px !important; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; }
+            .oee-badge.oee-pass { color: #166534 !important; }
+            .oee-badge.oee-fail { color: #b91c1c !important; }
+            .oee-badge.oee-neutral { color: #94a3b8 !important; }
+        }
+    </style>
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+
+    <div class="app-bar">Free-Flow Manufacturing<br>Shift Manager Console<br>(Beta Testing)</div>
+
+    <div class="tab-container">
+        <button class="tab-btn active" id="btn-calc" onclick="switchView(true)">Filler Calculator</button>
+        <button class="tab-btn" id="btn-oee" onclick="switchView(false)">Line Hourly Monitoring</button>
+    </div>
+
+    <div class="container">
+        <!-- Line Calculator Panel View -->
+        <div id="view-calculator">
+            <div class="card card-green">
+                <h3>Production Summary</h3>
+                <div class="card-row"><span>Product:</span><span id="lbl-product" class="card-value">-</span></div>
+                <div class="card-row"><span>Running Yield:</span><span id="lbl-yield" class="card-value yield-red">0.00%</span></div>
+                <div class="card-row"><span>Estimated Final Count:</span><span id="lbl-final-count" class="card-value">0</span></div>
+                <div class="card-row"><span>Estimated Finish Time:</span><span id="lbl-finish-time" class="card-value">00:00:00</span></div>
+            </div>
+
+            <div class="section-panel">
+                <div class="input-group"><label>Product</label><input type="text" id="tx-product" class="form-control" placeholder="Enter product name..." oninput="calculateMetrics()"></div>
+                <div class="input-group"><label>Can Size</label><select id="dr-size" class="form-control" onchange="calculateMetrics()"><option value="">Select package size...</option><option value="0.250">0.250</option><option value="0.330">0.330</option><option value="0.355">0.355</option><option value="0.440">0.440</option><option value="0.500">0.500</option></select></div>
+                <div class="input-group"><label>Total Plan</label><input type="text" id="tx-plan" class="form-control" inputmode="numeric" placeholder="0" oninput="calculateMetrics()" onblur="formatNumberField(this)"></div>
+                <div class="input-group"><label>Filler Speed</label><input type="text" id="tx-speed" class="form-control" inputmode="decimal" placeholder="0" oninput="calculateMetrics()" onblur="formatNumberField(this)"></div>
+            </div>
+
+            <div class="section-panel">
+                <div class="input-group"><label>Upstream Volume (Final Syrup)</label><input type="text" id="tx-uvol" class="form-control" inputmode="decimal" placeholder="0" oninput="calculateMetrics()" onblur="formatNumberField(this)"></div>
+                <div class="input-group"><label>Mixer Volume (ContiFlow KB)</label><input type="number" id="tx-mvol" class="form-control" inputmode="decimal" placeholder="0" oninput="calculateMetrics()"></div>
+                <div class="input-group"><label>Mixing Ratio %</label><input type="number" id="tx-ratio" class="form-control" inputmode="decimal" placeholder="0" oninput="calculateMetrics()"></div>
+                <div class="input-group"><label>Filler Production Counter</label><input type="text" id="tx-counter" class="form-control" inputmode="numeric" placeholder="0" oninput="calculateMetrics()" onblur="formatNumberField(this)"></div>
+                <div class="input-group"><label>Filler bowl level</label><input type="number" id="tx-bowl" class="form-control" inputmode="decimal" placeholder="0" oninput="calculateMetrics()"></div>
+                <div class="input-group"><label>Cans per layer</label><input type="number" id="tx-layer" class="form-control" inputmode="numeric" placeholder="0" oninput="calculateMetrics()"></div>
+                <div class="input-group"><label>Layers per pallet</label><input type="number" id="tx-pallet" class="form-control" inputmode="numeric" placeholder="0" oninput="calculateMetrics()"></div>
+                <button class="tab-btn" style="background-color: #0d47a1; color: white; margin-top: 8px;" onclick="updatePage()">Update</button>
+                <button class="tab-btn" style="background-color: #b91c1c; color: white; margin-top: 8px;" onclick="clearCalculatorInputs()">Clear Calculator</button>
+            </div>
+
+            <div class="card card-teal">
+                <h3>End Production (Based on remaining Syrup left)</h3>
+                <div class="card-row"><span>Remaining cans to be produce:</span><span id="lbl-remaining" class="card-value">0</span></div>
+                <div class="card-row"><span>Estimated layers left (-7):</span><span id="lbl-depal" class="card-value">0.0</span></div>
+                <div class="card-row"><span>Estimated pallets left:</span><span id="lbl-pallets-left" class="card-value">0.0</span></div>
+            </div>
+        </div>
+
+        <!-- Hourly OEE Panel View -->
+        <div id="view-tracker" style="display: none;">
+            <div class="card card-blue">
+                <h3 style="margin: 0; border: none; padding: 0; border-bottom: 1px solid currentColor; padding-bottom: 6px;">Free-Flow Performance Board</h3>
+
+                <div class="card-row" style="margin-top: 12px;">
+                    <label style="font-size: 11px; font-weight: 700; color: #1e3a8a; text-transform: uppercase; letter-spacing: 0.3px;">SKU:</label>
+                    <input type="date" id="tx-date" class="card-date-input" style="font-size: 13px; font-weight: 700; color: #1e40af;" onchange="saveToStorage()">
+                </div>
+
+                <textarea id="tx-sku" class="sku-textarea" rows="1" placeholder="Enter SKUs..." oninput="validateSKULength(this); saveSKU(); autoGrow(this)" maxlength="600"></textarea>
+                <div id="print-sku-shadow" class="print-sku-layer">-</div>
+
+            </div>
+
+            <div style="display: flex; justify-content: center; gap: 12px; margin-bottom: 15px; align-items: center; flex-wrap: wrap;">
+                <select id="dr-shift" class="form-control" style="max-width: 220px; margin: 0;" onchange="switchShift()">
+                    <option value="Morning">Morning Shift (06:00 - 18:00)</option>
+                    <option value="Night">Night Shift (18:00 - 06:00)</option>
+                    <option value="1st">1st Shift (06:00 - 14:00)</option>
+                    <option value="2nd">2nd Shift (14:00 - 22:00)</option>
+                    <option value="3rd">3rd Shift (22:00 - 06:00)</option>
+                    <option value="Custom">Custom Interval</option>
+                </select>
+                <button class="tab-btn" style="background-color: #0d47a1; color: white;" onclick="exportReport()">Print / Export Report</button>
+                <button class="tab-btn" style="background-color: #b91c1c; color: white;" onclick="clearCurrentShift()">Clear Shift Data</button>
+            </div>
+
+            <!-- Custom Interval Panel (shown only when Custom is selected) -->
+            <div id="custom-interval-panel" class="custom-interval-panel">
+                <label>Start:</label>
+                <input type="time" id="custom-start" value="06:00">
+                <label>End:</label>
+                <input type="time" id="custom-end" value="14:00">
+                <label>Interval:</label>
+                <select id="custom-interval">
+                    <option value="60">1 Hour</option>
+                    <option value="30">30 Minutes</option>
+                    <option value="15">15 Minutes</option>
+                    <option value="120">2 Hours</option>
+                </select>
+                <button class="tab-btn" style="background-color: #0d47a1; color: white;" onclick="generateCustomShift()">Generate Table</button>
+            </div>
+
+            <!-- Summary Cards -->
+            <div style="display: flex; gap: 15px; margin-bottom: 15px; justify-content: center; flex-wrap: wrap;">
+                <div class="card card-green">
+                    <div class="card-row"><span>Shift Total Output:</span><span style="font-weight: bold; font-size: 14px; color: #166534;" id="lbl-total-output">0</span></div>
+                </div>
+                <div class="card card-teal">
+                    <div class="card-row"><span>Shift Average OEE:</span><span style="font-weight: bold; font-size: 14px; color: #115e59;" id="lbl-avg-oee">0.00%</span></div>
+                </div>
+            </div>
+
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 120px;">TIME INTERVAL</th>
+                            <th style="width: 110px;">RATED SPEED</th>
+                            <th style="width: 110px;">ACTUAL OUTPUT</th>
+                            <th style="width: 80px;">OEE %</th>
+                            <th style="width: 70px;">QUALITY</th>
+                            <th style="width: 70px;">SAFETY</th>
+                            <th style="width: 380px;">DOWNTIME LOGS</th>
+                            <th style="width: 110px;">FILLER YIELD</th>
+                            <th style="width: 110px;">SCRAP</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body"></tbody>
+                </table>
+            </div>
+
+            <div class="card card-blue" id="notes-card">
+                <h3>Notes</h3>
+                <textarea id="tx-notes" class="table-text-area" rows="1" style="width: 100%; max-width: 100%; min-height: 80px; font-size: 13px; font-weight: 500; color: #0f172a; text-align: left;" placeholder="Enter production run details, observations, or handover notes... (Enter for new line)" oninput="saveNotes(); autoGrow(this)"></textarea>
+                <div id="print-notes-shadow" class="print-notes-layer">-</div>
+            </div>
+        </div>
+
+        <div class="footer">Shift Manager Console v2.00 - Created by <strong>Kelvin George</strong></div>
+    </div>
+
+    <script>
+        let currentShift = "Morning";
+        let anchors = { "Morning": new Date(), "Night": new Date(), "1st": new Date(), "2nd": new Date(), "3rd": new Date(), "Custom": new Date() };
+
+        function createEmptyRow() {
+            return { out: "", spd: "", log: "", yld: "", scr: "", q: 0, s: 0 };
+        }
+
+        function createEmptyShift(count) {
+            return Array.from({ length: count }, () => createEmptyRow());
+        }
+
+        function getDefaultRowCount(shift) {
+            if (shift === "Morning") return 12;
+            if (shift === "Night") return 12;
+            return 8;
+        }
+
+        let db = {
+            "Morning": createEmptyShift(12),
+            "Night": createEmptyShift(12),
+            "1st": createEmptyShift(8),
+            "2nd": createEmptyShift(8),
+            "3rd": createEmptyShift(8),
+            "Custom": []
+        };
+        let notes = { "Morning": "", "Night": "", "1st": "", "2nd": "", "3rd": "", "Custom": "" };
+        let skuData = { "Morning": "", "Night": "", "1st": "", "2nd": "", "3rd": "", "Custom": "" };
+        let customConfig = { start: "06:00", end: "14:00", interval: 60 };
+        let customHours = [];
+
+        /* ===== Time interval generation ===== */
+        function formatTime(totalMinutes) {
+            const m = ((totalMinutes % 1440) + 1440) % 1440;
+            const h = Math.floor(m / 60);
+            const min = m % 60;
+            return String(h).padStart(2, '0') + ":" + String(min).padStart(2, '0');
+        }
+
+        function generateHours(startStr, endStr, intervalMinutes) {
+            const [sh, sm] = startStr.split(':').map(Number);
+            const [eh, em] = endStr.split(':').map(Number);
+            let start = sh * 60 + sm;
+            let end = eh * 60 + em;
+            if (end <= start) end += 1440; /* overnight wrap */
+            const result = [];
+            let cursor = start;
+            while (cursor < end) {
+                result.push(formatTime(cursor) + " - " + formatTime(cursor + intervalMinutes));
+                cursor += intervalMinutes;
+            }
+            return result;
+        }
+
+        function getActiveHours() {
+            if (currentShift === "Morning") return generateHours("06:00", "18:00", 60);
+            if (currentShift === "Night") return generateHours("18:00", "06:00", 60);
+            if (currentShift === "1st") return generateHours("06:00", "14:00", 60);
+            if (currentShift === "2nd") return generateHours("14:00", "22:00", 60);
+            if (currentShift === "3rd") return generateHours("22:00", "06:00", 60);
+            if (currentShift === "Custom") return customHours;
+            return [];
+        }
+
+        function getRowCount() {
+            return (db[currentShift] && db[currentShift].length) || 0;
+        }
+
+        function validateSKULength(textarea) {
+            const lines = textarea.value.split('\n');
+            let cursorPosition = textarea.selectionStart;
+            let adjusted = false;
+
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].length > 60) {
+                    lines[i] = lines[i].substring(0, 60);
+                    adjusted = true;
+                }
+            }
+
+            if (adjusted) {
+                textarea.value = lines.join('\n');
+                textarea.setSelectionRange(cursorPosition, cursorPosition);
+            }
+        }
+
+        function saveSKU() {
+            const el = document.getElementById("tx-sku");
+            if (el) skuData[currentShift] = el.value;
+            localStorage.setItem("canning_calc_sku", JSON.stringify(skuData));
+            syncSKUShadow();
+        }
+
+        function syncSKUShadow() {
+            const ta = document.getElementById("tx-sku");
+            const div = document.getElementById("print-sku-shadow");
+            if (ta && div) div.innerText = ta.value.trim() || "-";
+        }
+
+        function saveNotes() {
+            const el = document.getElementById("tx-notes");
+            if (el) notes[currentShift] = el.value;
+            localStorage.setItem("canning_calc_notes", JSON.stringify(notes));
+            syncNotesShadow();
+        }
+
+        function syncNotesShadow() {
+            const ta = document.getElementById("tx-notes");
+            const div = document.getElementById("print-notes-shadow");
+            if (ta && div) div.innerText = ta.value.trim() || "-";
+        }
+
+        function saveToStorage() {
+            localStorage.setItem("canning_calc_db", JSON.stringify(db));
+            localStorage.setItem("canning_calc_notes", JSON.stringify(notes));
+            localStorage.setItem("canning_calc_sku", JSON.stringify(skuData));
+            localStorage.setItem("canning_calc_shift", currentShift);
+            localStorage.setItem("canning_calc_custom_config", JSON.stringify(customConfig));
+            const dateEl = document.getElementById("tx-date");
+            if (dateEl) localStorage.setItem("canning_calc_tx-date", dateEl.value);
+
+            const calcInputs = ["tx-product", "dr-size", "tx-plan", "tx-speed", "tx-uvol", "tx-mvol", "tx-ratio", "tx-counter", "tx-bowl", "tx-layer", "tx-pallet"];
+            calcInputs.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) localStorage.setItem("canning_calc_" + id, el.value);
+            });
+        }
+
+        function loadFromStorage() {
+            const savedDb = localStorage.getItem("canning_calc_db");
+            if (savedDb) {
+                const parsed = JSON.parse(savedDb);
+                if (!parsed["Morning"]) parsed["Morning"] = createEmptyShift(12);
+                if (!parsed["Night"]) parsed["Night"] = createEmptyShift(12);
+                if (!parsed["1st"]) parsed["1st"] = createEmptyShift(8);
+                if (!parsed["2nd"]) parsed["2nd"] = createEmptyShift(8);
+                if (!parsed["3rd"]) parsed["3rd"] = createEmptyShift(8);
+                if (!parsed["Custom"]) parsed["Custom"] = [];
+                db = parsed;
+            }
+
+            const savedNotes = localStorage.getItem("canning_calc_notes");
+            if (savedNotes) {
+                const parsedNotes = JSON.parse(savedNotes);
+                notes = Object.assign({ "Morning": "", "Night": "", "1st": "", "2nd": "", "3rd": "", "Custom": "" }, parsedNotes);
+            }
+
+            const savedSKU = localStorage.getItem("canning_calc_sku");
+            if (savedSKU) {
+                const parsedSKU = JSON.parse(savedSKU);
+                skuData = Object.assign({ "Morning": "", "Night": "", "1st": "", "2nd": "", "3rd": "", "Custom": "" }, parsedSKU);
+            }
+
+            const savedCustomConfig = localStorage.getItem("canning_calc_custom_config");
+            if (savedCustomConfig) {
+                customConfig = JSON.parse(savedCustomConfig);
+                customHours = generateHours(customConfig.start, customConfig.end, customConfig.interval);
+            }
+
+            const savedShift = localStorage.getItem("canning_calc_shift");
+            if (savedShift) {
+                currentShift = savedShift;
+                const shiftEl = document.getElementById("dr-shift");
+                if (shiftEl) shiftEl.value = currentShift;
+            }
+
+            /* Show/hide custom panel based on loaded shift */
+            const customPanel = document.getElementById("custom-interval-panel");
+            if (customPanel) {
+                customPanel.style.display = currentShift === "Custom" ? "flex" : "none";
+            }
+
+            /* Restore custom config inputs */
+            const cs = document.getElementById("custom-start");
+            const ce = document.getElementById("custom-end");
+            const ci = document.getElementById("custom-interval");
+            if (cs) cs.value = customConfig.start;
+            if (ce) ce.value = customConfig.end;
+            if (ci) ci.value = String(customConfig.interval);
+
+            const savedDate = localStorage.getItem("canning_calc_tx-date");
+            const dateEl = document.getElementById("tx-date");
+            if (dateEl) {
+                if (savedDate) dateEl.value = savedDate;
+                else {
+                    const today = new Date();
+                    const yyyy = today.getFullYear();
+                    const mm = String(today.getMonth() + 1).padStart(2, '0');
+                    const dd = String(today.getDate()).padStart(2, '0');
+                    dateEl.value = `${yyyy}-${mm}-${dd}`;
+                }
+            }
+
+            const calcInputs = ["tx-product", "dr-size", "tx-plan", "tx-speed", "tx-uvol", "tx-mvol", "tx-ratio", "tx-counter", "tx-bowl", "tx-layer", "tx-pallet"];
+            calcInputs.forEach(id => {
+                const val = localStorage.getItem("canning_calc_" + id);
+                const el = document.getElementById(id);
+                if (el && val !== null) el.value = val;
+            });
+
+            const notesEl = document.getElementById("tx-notes");
+            if (notesEl) notesEl.value = notes[currentShift] || "";
+
+            const skuEl = document.getElementById("tx-sku");
+            if (skuEl) skuEl.value = skuData[currentShift] || "";
+        }
+
+        function buildTable() {
+            const body = document.getElementById("table-body");
+            body.innerHTML = "";
+            const activeHours = getActiveHours();
+            const count = getRowCount();
+            const data = db[currentShift];
+
+            if (count === 0) {
+                body.innerHTML = '<tr><td colspan="9" style="padding: 30px; color: #64748b; font-size: 14px;">' +
+                    (currentShift === "Custom"
+                        ? 'Configure your custom start time, end time, and interval above, then click "Generate Table".'
+                        : 'No rows for this shift.') +
+                    '</td></tr>';
+                calculateMetrics();
+                calculateTotals();
+                return;
+            }
+
+            for (let i = 0; i < count; i++) {
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td style="font-weight: 700; font-size: 13px; white-space: nowrap; color: #334155;">${activeHours[i]}</td>
+                    <td><input type="text" id="spd-${i}" class="table-input" inputmode="numeric" value="${data[i].spd}" placeholder="0" oninput="storeRow(${i})" onblur="formatNumberField(this)"></td>
+                    <td><input type="text" id="out-${i}" class="table-input" inputmode="numeric" value="${data[i].out}" placeholder="0" oninput="storeRow(${i})" onblur="formatNumberField(this)"></td>
+                    <td><span id="oee-${i}" class="oee-badge">0.0%</span></td>
+                    <td><button id="q-${i}" class="toggle-btn" onclick="toggleState(${i}, 'q')">?</button></td>
+                    <td><button id="s-${i}" class="toggle-btn" onclick="toggleState(${i}, 's')">?</button></td>
+                    <td>
+                        <textarea id="log-${i}" class="table-text-area" rows="1" placeholder="Type shift delays... (Enter for new line, Tab for next field)" oninput="syncPrintShadow(${i}); autoGrow(this); storeRow(${i})">${data[i].log}</textarea>
+                        <div id="print-shadow-${i}" class="print-shadow-layer">${data[i].log || "-"}</div>
+                    </td>
+                    <td><input type="text" id="yld-${i}" class="table-input" inputmode="decimal" value="${data[i].yld}" placeholder="0.0%" onblur="applyYieldColor(${i}, 'yld')" oninput="storeRow(${i})"></td>
+                    <td><input type="text" id="scr-${i}" class="table-input" inputmode="decimal" value="${data[i].scr}" placeholder="0.0%" onblur="applyYieldColor(${i}, 'scr')" oninput="storeRow(${i})"></td>
+                `;
+                body.appendChild(tr);
+                updateToggleUI(i, 'q');
+                updateToggleUI(i, 's');
+            }
+
+            setTimeout(() => {
+                for (let i = 0; i < count; i++) {
+                    const ta = document.getElementById(`log-${i}`);
+                    if (ta) {
+                        if (ta.value) autoGrow(ta);
+                        syncPrintShadow(i);
+                    }
+                    applyYieldColor(i, 'yld');
+                    applyYieldColor(i, 'scr');
+                }
+                const skuEl = document.getElementById("tx-sku");
+                if (skuEl && skuEl.value) {
+                    autoGrow(skuEl);
+                }
+                const notesEl = document.getElementById("tx-notes");
+                if (notesEl && notesEl.value) {
+                    autoGrow(notesEl);
+                }
+            }, 50);
+
+            setupFocusChain();
+            const notesEl = document.getElementById("tx-notes");
+            if (notesEl) { notesEl.value = notes[currentShift] || ""; }
+            const skuEl = document.getElementById("tx-sku");
+            if (skuEl) { skuEl.value = skuData[currentShift] || ""; }
+            syncNotesShadow();
+            syncSKUShadow();
+            calculateMetrics();
+            calculateTotals();
+        }
+
+        function calculateTotals() {
+            let totalOutput = 0;
+            let totalOEE = 0;
+            let oeeCount = 0;
+            const count = getRowCount();
+
+            for (let i = 0; i < count; i++) {
+                const rowOut = parseNum(db[currentShift][i].out);
+                const rowSpd = parseNum(db[currentShift][i].spd);
+                totalOutput += rowOut;
+
+                if (rowOut > 0 && rowSpd > 0) {
+                    const oee = (rowOut / rowSpd) * 100;
+                    totalOEE += oee;
+                    oeeCount++;
+                }
+            }
+
+            const totalOutputEl = document.getElementById("lbl-total-output");
+            if (totalOutputEl) {
+                totalOutputEl.innerHTML = totalOutput.toLocaleString();
+                totalOutputEl.style.color = "#166534";
+            }
+
+            const totalOutputInsideEl = document.getElementById("lbl-total-output-inside");
+            if (totalOutputInsideEl) {
+                totalOutputInsideEl.innerHTML = totalOutput.toLocaleString();
+                totalOutputInsideEl.style.color = "#166534";
+            }
+
+            const avgOeeEl = document.getElementById("lbl-avg-oee");
+            if (avgOeeEl) {
+                if (oeeCount > 0) {
+                    const avgOEE = totalOEE / oeeCount;
+                    avgOeeEl.innerHTML = avgOEE.toFixed(2) + "%";
+                    avgOeeEl.style.color = "#115e59";
+                } else {
+                    avgOeeEl.innerHTML = "0.00%";
+                    avgOeeEl.style.color = "#115e59";
+                }
+            }
+
+            const avgOeeInsideEl = document.getElementById("lbl-avg-oee-inside");
+            if (avgOeeInsideEl) {
+                if (oeeCount > 0) {
+                    const avgOEE = totalOEE / oeeCount;
+                    avgOeeInsideEl.innerHTML = avgOEE.toFixed(2) + "%";
+                    avgOeeInsideEl.style.color = "#115e59";
+                } else {
+                    avgOeeInsideEl.innerHTML = "0.00%";
+                    avgOeeInsideEl.style.color = "#115e59";
+                }
+            }
+        }
+
+        function syncPrintShadow(i) {
+            const ta = document.getElementById(`log-${i}`);
+            const div = document.getElementById(`print-shadow-${i}`);
+            if (ta && div) div.innerText = ta.value.trim() || "-";
+        }
+
+        function autoGrow(element) {
+            element.style.height = "28px";
+            element.style.height = (element.scrollHeight) + "px";
+        }
+
+        function storeRow(i) {
+            if (!db[currentShift] || !db[currentShift][i]) return;
+            db[currentShift][i].spd = document.getElementById(`spd-${i}`).value;
+            db[currentShift][i].out = document.getElementById(`out-${i}`).value;
+            db[currentShift][i].log = document.getElementById(`log-${i}`).value;
+            db[currentShift][i].yld = document.getElementById(`yld-${i}`).value;
+            db[currentShift][i].scr = document.getElementById(`scr-${i}`).value;
+            saveToStorage();
+            calculateMetrics();
+            calculateTotals();
+        }
+
+        function applyYieldColor(i, field) {
+            const el = document.getElementById(`${field}-${i}`);
+            if (!el) return;
+
+            let val = el.value.replace(/%/g, "").trim();
+
+            el.classList.remove('yield-input-red', 'yield-input-green');
+
+            if (val) {
+                if (!el.value.includes('%')) {
+                    el.value = val + "%";
+                }
+
+                if (field === 'yld') {
+                    const num = parseFloat(val) || 0;
+                    if (num < 97.0) {
+                        el.classList.add('yield-input-red');
+                    } else {
+                        el.classList.add('yield-input-green');
+                    }
+                }
+            } else {
+                el.classList.remove('yield-input-red', 'yield-input-green');
+            }
+
+            db[currentShift][i][field] = el.value;
+            saveToStorage();
+        }
+
+        function toggleState(i, type) {
+            if (!db[currentShift] || !db[currentShift][i]) return;
+            db[currentShift][i][type] = (db[currentShift][i][type] + 1) % 3;
+            updateToggleUI(i, type);
+            saveToStorage();
+        }
+
+        function updateToggleUI(i, type) {
+            const btn = document.getElementById(`${type}-${i}`);
+            if (!btn) return;
+            const val = db[currentShift][i][type];
+            if (val === 1) {
+                btn.className = "toggle-btn pass";
+                btn.innerHTML = "✔";
+            } else if (val === 2) {
+                btn.className = "toggle-btn issue";
+                btn.innerHTML = "✖";
+            } else {
+                btn.className = "toggle-btn neutral";
+                btn.innerHTML = "?";
+            }
+            btn.title = type.toUpperCase() + ": " + (val === 1 ? "Pass" : (val === 2 ? "Issue Logged" : "Not Selected"));
+        }
+
+        function setupFocusChain() {
+            const count = getRowCount();
+            for (let i = 0; i < count; i++) {
+                setupSubmit(document.getElementById(`spd-${i}`), `out-${i}`);
+                setupSubmit(document.getElementById(`out-${i}`), `log-${i}`);
+                setupSubmit(document.getElementById(`yld-${i}`), `scr-${i}`);
+                if (i < count - 1) setupSubmit(document.getElementById(`scr-${i}`), `spd-${i+1}`);
+                else setupSubmit(document.getElementById(`scr-${i}`), "tx-product");
+
+                const logEl = document.getElementById(`log-${i}`);
+                if (logEl) {
+                    logEl.addEventListener("focus", function() { autoGrow(this); });
+                }
+            }
+        }
+
+        function setupSubmit(el, nextId) {
+            if (!el) return;
+            el.addEventListener("keydown", function(e) {
+                if (e.key === "Enter") { e.preventDefault(); const n = document.getElementById(nextId); if (n) n.focus(); }
+            });
+            el.addEventListener("focus", function() { setTimeout(() => this.select(), 50); });
+        }
+
+        function switchView(isCalc) {
+            document.getElementById("view-calculator").style.display = isCalc ? "block" : "none";
+            document.getElementById("view-tracker").style.display = isCalc ? "none" : "block";
+            document.getElementById("btn-calc").className = "tab-btn " + (isCalc ? "active" : "");
+            document.getElementById("btn-oee").className = "tab-btn " + (!isCalc ? "active" : "");
+            saveToStorage();
+            calculateMetrics();
+
+            if (!isCalc) {
+                setTimeout(() => {
+                    const count = getRowCount();
+                    for (let i = 0; i < count; i++) {
+                        const ta = document.getElementById(`log-${i}`);
+                        if (ta) {
+                            if (ta.value) autoGrow(ta);
+                            syncPrintShadow(i);
+                        }
+                        applyYieldColor(i, 'yld');
+                        applyYieldColor(i, 'scr');
+                    }
+                    calculateTotals();
+                }, 50);
+            }
+        }
+
+        function switchShift() {
+            const notesEl = document.getElementById("tx-notes");
+            if (notesEl) notes[currentShift] = notesEl.value;
+
+            const skuEl = document.getElementById("tx-sku");
+            if (skuEl) skuData[currentShift] = skuEl.value;
+
+            currentShift = document.getElementById("dr-shift").value;
+
+            const customPanel = document.getElementById("custom-interval-panel");
+            if (customPanel) {
+                customPanel.style.display = currentShift === "Custom" ? "flex" : "none";
+            }
+
+            saveToStorage();
+            buildTable();
+            const newNotesEl = document.getElementById("tx-notes");
+            if (newNotesEl) { newNotesEl.value = notes[currentShift] || ""; autoGrow(newNotesEl); }
+            const newSkuEl = document.getElementById("tx-sku");
+            if (newSkuEl) { newSkuEl.value = skuData[currentShift] || ""; autoGrow(newSkuEl); }
+        }
+
+        function generateCustomShift() {
+            const start = document.getElementById("custom-start").value || "06:00";
+            const end = document.getElementById("custom-end").value || "14:00";
+            const interval = parseInt(document.getElementById("custom-interval").value) || 60;
+
+            if (start === end) {
+                alert("Start time and end time cannot be the same.");
+                return;
+            }
+
+            customConfig = { start: start, end: end, interval: interval };
+            customHours = generateHours(start, end, interval);
+
+            const newCount = customHours.length;
+            const oldData = db["Custom"] || [];
+            db["Custom"] = Array.from({ length: newCount }, (_, i) =>
+                oldData[i] ? Object.assign({}, oldData[i]) : createEmptyRow()
+            );
+
+            saveToStorage();
+            buildTable();
+        }
+
+        function clearCalculatorInputs() {
+            const confirmed = confirm("WARNING: You are about to clear all Filler Calculator inputs. Do you want to proceed?");
+            if (!confirmed) return;
+
+            document.getElementById("tx-product").value = "";
+            document.getElementById("dr-size").value = "";
+            document.getElementById("tx-plan").value = "";
+            document.getElementById("tx-speed").value = "";
+            document.getElementById("tx-uvol").value = "";
+            document.getElementById("tx-mvol").value = "";
+            document.getElementById("tx-ratio").value = "";
+            document.getElementById("tx-counter").value = "";
+            document.getElementById("tx-bowl").value = "";
+            document.getElementById("tx-layer").value = "";
+            document.getElementById("tx-pallet").value = "";
+            saveToStorage();
+            calculateMetrics();
+        }
+
+        function updatePage() {
+            saveToStorage();
+            window.location.reload();
+        }
+
+        function exportReport() {
+            const dateEl = document.getElementById("tx-date");
+            const dateStr = dateEl && dateEl.value ? dateEl.value : "";
+            const originalTitle = document.title;
+            document.title = "FF_" + currentShift + (dateStr ? "_" + dateStr : "");
+            window.print();
+            document.title = originalTitle;
+        }
+
+        function clearCurrentShift() {
+            const confirmed = confirm("WARNING: You are about to completely delete all data entered for this shift. Do you want to proceed?");
+            if (!confirmed) return;
+
+            anchors[currentShift] = new Date();
+            if (currentShift === "Custom") {
+                db[currentShift] = [];
+                customHours = [];
+            } else {
+                db[currentShift] = createEmptyShift(getDefaultRowCount(currentShift));
+            }
+            notes[currentShift] = "";
+            skuData[currentShift] = "";
+            saveToStorage();
+            buildTable();
+        }
+
+        function calculateMetrics() {
+            const pName = document.getElementById("tx-product").value.trim();
+            const lblProd = document.getElementById("lbl-product");
+            if (lblProd) lblProd.innerHTML = pName || "-";
+
+            const sz = parseNum(document.getElementById("dr-size").value);
+            const pl = parseNum(document.getElementById("tx-plan").value);
+            const sp = parseNum(document.getElementById("tx-speed").value);
+            const uv = parseNum(document.getElementById("tx-uvol").value);
+            const mv = parseNum(document.getElementById("tx-mvol").value);
+            const rt = parseNum(document.getElementById("tx-ratio").value);
+            const cnt = parseNum(document.getElementById("tx-counter").value);
+            const fb = parseNum(document.getElementById("tx-bowl").value);
+            const cl = parseNum(document.getElementById("tx-layer").value);
+            const lp = parseNum(document.getElementById("tx-pallet").value);
+
+            if (sz > 0 && pl > 0) {
+                const rem = ((uv + 110.0) / (rt / 100.0 > 0 ? rt / 100.0 : 0.10) + mv + fb) / sz;
+                document.getElementById("lbl-remaining").innerHTML = Math.round(rem).toLocaleString();
+
+                const finalCountEl = document.getElementById("lbl-final-count");
+                if (finalCountEl) finalCountEl.innerHTML = Math.round(cnt + rem).toLocaleString();
+
+                const yPct = ((cnt + rem) / pl) * 100;
+                const yLbl = document.getElementById("lbl-yield");
+                if (yLbl) {
+                    yLbl.innerHTML = yPct.toFixed(2) + "%";
+                    yLbl.className = "card-value " + (yPct >= 97 ? "yield-green" : "yield-red");
+                }
+
+                const dp = Math.max(0, (rem / cl) - 7);
+                document.getElementById("lbl-depal").innerHTML = dp.toFixed(1);
+                document.getElementById("lbl-pallets-left").innerHTML = lp > 0 ? (dp / lp).toFixed(1) : "0.0";
+
+                if (rem > 0 && sp > 0) {
+                    const totalSecondsToAdd = (rem / sp) * 3600;
+                    const calculatedFinishDate = new Date(anchors[currentShift].getTime() + (totalSecondsToAdd * 1000));
+
+                    const pad = (num) => String(num).padStart(2, '0');
+                    const hh = pad(calculatedFinishDate.getHours());
+                    const mm = pad(calculatedFinishDate.getMinutes());
+                    const ss = pad(calculatedFinishDate.getSeconds());
+
+                    const finishTimeEl = document.getElementById("lbl-finish-time");
+                    if (finishTimeEl) finishTimeEl.innerHTML = `${hh}:${mm}:${ss}`;
+                } else { if (document.getElementById("lbl-finish-time")) document.getElementById("lbl-finish-time").innerHTML = "00:00:00"; }
+            } else {
+                document.getElementById("lbl-remaining").innerHTML = "0";
+                if (document.getElementById("lbl-final-count")) document.getElementById("lbl-final-count").innerHTML = "0";
+                if (document.getElementById("lbl-yield")) {
+                    document.getElementById("lbl-yield").innerHTML = "0.00%";
+                    document.getElementById("lbl-yield").className = "card-value yield-red";
+                }
+                document.getElementById("lbl-depal").innerHTML = "0.0";
+                document.getElementById("lbl-pallets-left").innerHTML = "0.0";
+                if (document.getElementById("lbl-finish-time")) document.getElementById("lbl-finish-time").innerHTML = "00:00:00";
+            }
+
+            const count = getRowCount();
+            for (let i = 0; i < count; i++) {
+                const rowOut = parseNum(db[currentShift][i].out);
+                const rowSpd = parseNum(db[currentShift][i].spd);
+                const oeeEl = document.getElementById(`oee-${i}`);
+                if (oeeEl) {
+                    if (rowOut > 0 && rowSpd > 0) {
+                        const oee = (rowOut / rowSpd) * 100;
+                        oeeEl.innerHTML = oee.toFixed(2) + "%";
+                        oeeEl.classList.remove('oee-neutral', 'oee-pass', 'oee-fail');
+                        oeeEl.classList.add(oee >= 70 ? 'oee-pass' : 'oee-fail');
+                    } else {
+                        oeeEl.innerHTML = "0.00%";
+                        oeeEl.classList.remove('oee-neutral', 'oee-pass', 'oee-fail');
+                        oeeEl.classList.add('oee-neutral');
+                    }
+                }
+            }
+            saveToStorage();
+        }
+
+        function parseNum(val) {
+            return parseFloat(String(val || "").replace(/,/g, "")) || 0;
+        }
+
+        function formatNumberField(el) {
+            const raw = el.value.replace(/,/g, "").trim();
+            if (raw === "" || isNaN(parseFloat(raw))) { return; }
+            const parts = raw.split(".");
+            const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+            el.value = parts.length > 1 ? intPart + "." + parts[1] : intPart;
+            if (el.id.startsWith("spd-") || el.id.startsWith("out-")) {
+                const i = parseInt(el.id.split("-")[1], 10);
+                storeRow(i);
+            } else {
+                calculateMetrics();
+            }
+        }
+
+        function setupCalculatorFocusChain() {
+            const order = ["tx-product", "dr-size", "tx-plan", "tx-speed", "tx-uvol", "tx-mvol", "tx-ratio", "tx-counter", "tx-bowl", "tx-layer", "tx-pallet"];
+            order.forEach((id, idx) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                const nextId = idx < order.length - 1 ? order[idx + 1] : "tx-product";
+                el.addEventListener("keydown", function(e) {
+                    if (e.key === "Enter") { e.preventDefault(); const n = document.getElementById(nextId); if (n) n.focus(); }
+                });
+                el.addEventListener("focus", function() { setTimeout(() => this.select(), 50); });
+            });
+        }
+
+        window.onload = function() {
+            loadFromStorage();
+            buildTable();
+            setupCalculatorFocusChain();
+        };
+    </script>
+</body>
+</html>

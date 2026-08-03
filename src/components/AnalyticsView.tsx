@@ -1,8 +1,9 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { BarChart3, Loader2, FileDown, ExternalLink, RefreshCw, Calendar, Clock, FileText } from 'lucide-react';
 import { PageHelp } from '@/components/PageHelp';
 import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
-import type { Shift } from '@/types';
+import { ShiftReport } from '@/components/ShiftReport';
+import { getActiveHours, type Shift } from '@/types';
 import { fetchDowntimeBetween, formatDuration, localDateTimeToEpoch, type DowntimeEvent } from '@/lib/downtime';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
 import {
@@ -75,71 +76,6 @@ const BAR_COLORS = ['#1d4ed8', '#dc2626', '#eab308', '#16a34a', '#9333ea', '#0e7
 
 function barColor(i: number): string {
   return BAR_COLORS[i % BAR_COLORS.length];
-}
-
-function renderReportInline(text: string): ReactNode {
-  const parts = text.split(/\*\*(.+?)\*\*/g);
-  return (
-    <>
-      {parts.map((p, i) => (i % 2 === 1 ? <strong key={i}>{p}</strong> : <span key={i}>{p}</span>))}
-    </>
-  );
-}
-
-function ReportSnapshot({ snapshot }: { snapshot: string }) {
-  const lines = snapshot.split('\n');
-  const blocks: ReactNode[] = [];
-  let key = 0;
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    const trimmed = line.trim();
-    if (trimmed === '') { i++; continue; }
-    if (line.startsWith('|')) {
-      const rows: string[][] = [];
-      while (i < lines.length && lines[i].startsWith('|')) {
-        const cells = lines[i].split('|').slice(1, -1).map((c) => c.trim());
-        rows.push(cells);
-        i++;
-      }
-      const header = rows[0] ?? [];
-      let body = rows.slice(1);
-      if (body.length > 0 && body[0]!.every((c) => /^-{1,}$/.test(c))) body = body.slice(1);
-      blocks.push(
-        <div key={key++} style={{ overflowX: 'auto', margin: '10px 0' }}>
-          <table className="report-table">
-            <thead>
-              <tr>{header.map((c, ci) => <th key={ci}>{renderReportInline(c)}</th>)}</tr>
-            </thead>
-            <tbody>
-              {body.map((row, ri) => (
-                <tr key={ri}>
-                  {row.map((c, ci) => <td key={ci}>{renderReportInline(c)}</td>)}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
-      continue;
-    }
-    if (line.startsWith('### ')) { blocks.push(<h3 key={key++}>{renderReportInline(line.slice(4))}</h3>); i++; continue; }
-    if (line.startsWith('## ')) { blocks.push(<h2 key={key++}>{renderReportInline(line.slice(3))}</h2>); i++; continue; }
-    if (line.startsWith('# ')) { blocks.push(<h1 key={key++}>{renderReportInline(line.slice(2))}</h1>); i++; continue; }
-    if (trimmed === '---') { blocks.push(<hr key={key++} />); i++; continue; }
-    if (line.startsWith('- ')) {
-      const items: string[] = [];
-      while (i < lines.length && (lines[i].startsWith('- ') || lines[i].startsWith('  '))) {
-        if (lines[i].startsWith('- ')) items.push(lines[i].slice(2));
-        i++;
-      }
-      blocks.push(<ul key={key++}>{items.map((it, iti) => <li key={iti}>{renderReportInline(it)}</li>)}</ul>);
-      continue;
-    }
-    blocks.push(<p key={key++}>{renderReportInline(line)}</p>);
-    i++;
-  }
-  return <>{blocks}</>;
 }
 
 interface AnalyticsViewProps {
@@ -873,14 +809,15 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
               <h2>Saved Report — {reportRecord.shift_name} · {reportRecord.record_date}</h2>
               <button type="button" className="modal-close-btn" onClick={() => setReportRecord(null)} aria-label="Close">✕</button>
             </div>
-            {reportRecord.report_snapshot ? (
-              <ReportSnapshot snapshot={reportRecord.report_snapshot} />
-            ) : (
-              <p className="modal-description">
-                No report snapshot was saved with this record (it was saved before the report feature was added).
-                Use Open to load it onto the Monitoring board instead.
-              </p>
-            )}
+            <ShiftReport
+              shift={reportRecord.shift_name as Shift}
+              date={reportRecord.record_date}
+              hours={reportRecord.hours?.length ? reportRecord.hours : getActiveHours(reportRecord.shift_name as Shift, [])}
+              boardData={reportRecord.board_data}
+              notes={reportRecord.notes ?? ''}
+              sku={reportRecord.sku ?? ''}
+              downtimeEvents={reportRecord.downtime_snapshot ?? []}
+            />
           </div>
         </div>
       )}

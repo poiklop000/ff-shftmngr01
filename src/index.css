@@ -31,12 +31,18 @@ html {
   max-width: 1200px;
   margin: 0 auto;
 }
-.app-bar-title { display: block; }
-.app-bar-settings-btn {
+.app-bar-title { display: block; padding: 0 92px; }
+.app-bar-actions {
   position: absolute;
   right: 0;
   top: 50%;
   transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.app-bar-settings-btn {
+  position: static;
   background: rgba(255, 255, 255, 0.15);
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 50%;
@@ -49,8 +55,16 @@ html {
   cursor: pointer;
   transition: background-color 0.2s, transform 0.15s;
 }
-.app-bar-settings-btn:hover { background: rgba(255, 255, 255, 0.28); transform: translateY(-50%) scale(1.05); }
-.app-bar-settings-btn:active { transform: translateY(-50%) scale(0.95); }
+.app-bar-settings-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.28); transform: scale(1.05); }
+.app-bar-settings-btn:active:not(:disabled) { transform: scale(0.95); }
+.app-bar-settings-btn:disabled { opacity: 0.6; cursor: default; }
+.app-bar-sync-msg {
+  max-width: 1200px;
+  margin: 10px auto 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
 
 /* ---- App bar global controls (date + shift) ---- */
 .app-bar-controls {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Calculator, ClipboardList, Activity, TimerOff, Settings, Calendar, Clock, BarChart3, Shield, LogOut } from 'lucide-react';
+import { Calculator, ClipboardList, Activity, TimerOff, Settings, Calendar, Clock, BarChart3, Shield, LogOut, Database, Loader2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { AnalyticsView } from '@/components/AnalyticsView';
 import { CalculatorView } from '@/components/CalculatorView';
@@ -34,6 +34,7 @@ import { fetchCounterLogsByDate } from '@/lib/counterLogs';
 import { fetchDowntimeByDate } from '@/lib/downtime';
 import { saveMonitoringRecord, loadMonitoringRecord, buildActiveJobSnapshot, type ActiveJobSnapshot } from '@/lib/monitoring';
 import { fetchOfsStatus } from '@/lib/ofs';
+import { syncAllData } from '@/lib/captureSync';
 
 type View = 'calculator' | 'tracker' | 'live' | 'downtime' | 'analytics' | 'admin';
 const VIEW_KEY = 'canning_calc_view';
@@ -67,6 +68,10 @@ export default function App() {
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [hasSavedRecord, setHasSavedRecord] = useState(false);
   const [lastSavedBy, setLastSavedBy] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncTick, setSyncTick] = useState(0);
 
   const [authReady, setAuthReady] = useState(false);
   const [session, setSession] = useState<Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session']>(null);
@@ -107,6 +112,27 @@ export default function App() {
   const handleSignOut = async () => {
     await signOut();
     setProfile(null);
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncMessage(null);
+    setSyncError(null);
+    try {
+      const outcome = await syncAllData();
+      if (outcome.allOk) {
+        setSyncMessage('Sync complete — downtime, counters and jobs updated.');
+        setSyncTick((t) => t + 1);
+      } else {
+        setSyncError(
+          `Sync finished with issues: ${outcome.results.filter((r) => !r.ok).map((r) => `${r.name} (${r.status ?? r.error ?? 'failed'})`).join(', ')}.`,
+        );
+      }
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSyncing(false);
+    }
   };
 
   useEffect(() => {
@@ -563,16 +589,36 @@ function epochToConsoleTime(
               <LogOut size={16} />
               Logout
             </button>
-            <button
-              type="button"
-              className="app-bar-settings-btn"
-              onClick={() => setSettingsOpen(true)}
-              aria-label="Settings"
-            >
-              <Settings size={22} />
-            </button>
+            <div className="app-bar-actions">
+              <button
+                type="button"
+                className="app-bar-settings-btn"
+                onClick={() => setSettingsOpen(true)}
+                aria-label="Settings"
+                title="Settings"
+              >
+                <Settings size={22} />
+              </button>
+              <button
+                type="button"
+                className="app-bar-settings-btn"
+                onClick={handleSync}
+                aria-label="Sync data from OFS"
+                title="Sync data from OFS"
+                disabled={syncing}
+              >
+                {syncing ? <Loader2 size={22} className="animate-spin" /> : <Database size={22} />}
+              </button>
+            </div>
           </div>
         </div>
+
+        {syncMessage && (
+          <div className="app-bar-sync-msg" style={{ color: '#d1fae5' }}>{syncMessage}</div>
+        )}
+        {syncError && (
+          <div className="app-bar-sync-msg" style={{ color: '#fecaca' }}>{syncError}</div>
+        )}
 
         <div className="app-bar-controls no-print">
           <div className="app-bar-ctrl-group">
@@ -662,7 +708,7 @@ function epochToConsoleTime(
             customHours={data.customHours}
           />
         ) : effectiveView === 'analytics' ? (
-          <AnalyticsView onOpenRecord={handleOpenRecordFromAnalytics} />
+          <AnalyticsView onOpenRecord={handleOpenRecordFromAnalytics} syncTick={syncTick} />
         ) : effectiveView === 'admin' ? (
           <AdminView currentUserId={currentUserId} />
         ) : (

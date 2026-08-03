@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, Loader2, FileDown, ExternalLink, RefreshCw, Calendar, Clock, FileText, History, Database } from 'lucide-react';
+import { BarChart3, Loader2, FileDown, ExternalLink, RefreshCw, Calendar, Clock, FileText, History } from 'lucide-react';
 import { PageHelp } from '@/components/PageHelp';
 import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
 import { ShiftReport } from '@/components/ShiftReport';
@@ -12,7 +12,6 @@ import {
   type JobSnapshotRow,
 } from '@/lib/analytics';
 import { fetchRecordAudit, type MonitoringRecord, type MonitoringRecordAudit } from '@/lib/monitoring';
-import { syncAllData } from '@/lib/captureSync';
 
 function csvEscape(value: string | number | null | undefined): string {
   const str = String(value ?? '');
@@ -124,9 +123,10 @@ function barColor(i: number): string {
 
 interface AnalyticsViewProps {
   onOpenRecord: (recordDate: string, shift: Shift) => Promise<void>;
+  syncTick?: number;
 }
 
-export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
+export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps) {
   const [persisted] = useState(() => loadAnalyticsPersist());
   const [startAt, setStartAt] = useState(persisted.startAt);
   const [endAt, setEndAt] = useState(persisted.endAt);
@@ -141,9 +141,6 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
   const [auditRecord, setAuditRecord] = useState<MonitoringRecord | null>(null);
   const [auditEntries, setAuditEntries] = useState<MonitoringRecordAudit[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
 
   // Keep the Analytics filters and last loaded range in localStorage so the
   // page remembers them when the user navigates away and comes back.
@@ -204,33 +201,21 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // After a header Sync completes, reload the currently loaded range so the
+  // freshly captured data shows immediately.
+  useEffect(() => {
+    if (syncTick > 0 && loadedRange?.start && loadedRange?.end) {
+      loadData(loadedRange.start, loadedRange.end);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncTick]);
+
   const handleQuick = (days: number) => {
     const st = `${dateOffset(days > 0 ? -days + 1 : 0)}T00:00`;
     const en = `${dateOffset(0)}T23:59`;
     setStartAt(st);
     setEndAt(en);
     loadData(st, en);
-  };
-
-  const handleSync = async (start: string, end: string) => {
-    setSyncing(true);
-    setSyncMessage(null);
-    setSyncError(null);
-    try {
-      const outcome = await syncAllData();
-      setSyncMessage(
-        outcome.allOk
-          ? 'Sync complete — downtime, counters and jobs updated. Reloading data…'
-          : `Sync finished with issues: ${outcome.results.filter((r) => !r.ok).map((r) => `${r.name} (${r.status ?? r.error ?? 'failed'})`).join(', ')}.`,
-      );
-      if (outcome.allOk && start && end) {
-        await loadData(start, end);
-      }
-    } catch (err) {
-      setSyncError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSyncing(false);
-    }
   };
 
   const handleOpenHistory = async (r: MonitoringRecord) => {
@@ -486,23 +471,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
             {isLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             Load Data
           </button>
-          <button
-            type="button"
-            className="tab-btn tab-btn-purple"
-            onClick={() => handleSync(startAt, endAt)}
-            disabled={syncing}
-          >
-            {syncing ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
-            Sync Data
-          </button>
         </div>
-
-        {syncMessage && (
-          <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: '#15803d' }}>{syncMessage}</div>
-        )}
-        {syncError && (
-          <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: '#b91c1c' }}>Sync failed: {syncError}</div>
-        )}
 
         <div className="card-row" style={{ flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
           {[
@@ -596,7 +565,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
               <div className="card-scroll">
                 <table className="w-full text-[13px]" style={{ minWidth: 680 }}>
                   <thead>
-                    <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200">
+                    <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-800 border-b border-slate-200">
                       <th className="px-4 py-2.5">Job</th>
                       <th className="px-4 py-2.5">SKU</th>
                       <th className="px-4 py-2.5">Target</th>
@@ -716,7 +685,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
               <div className="card-scroll">
                 <table className="w-full text-[13px]" style={{ minWidth: 720 }}>
                   <thead>
-                    <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200">
+                    <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-800 border-b border-slate-200">
                       <th className="px-4 py-2.5">Start</th>
                       <th className="px-4 py-2.5">Duration</th>
                       <th className="px-4 py-2.5">Type</th>
@@ -822,7 +791,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
                 <div className="card-scroll">
                   <table className="w-full text-[13px]" style={{ minWidth: 560 }}>
                     <thead>
-                      <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200">
+                      <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-800 border-b border-slate-200">
                         <th className="px-4 py-2.5">Date</th>
                         <th className="px-4 py-2.5">Hour</th>
                         <th className="px-4 py-2.5">In</th>
@@ -880,7 +849,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
               <div className="card-scroll">
                 <table className="w-full text-[13px]" style={{ minWidth: 420 }}>
                   <thead>
-                    <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200">
+                    <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-800 border-b border-slate-200">
                       <th className="px-4 py-2.5">Date</th>
                       <th className="px-4 py-2.5">Shift</th>
                       <th className="px-4 py-2.5">Saved By</th>
@@ -959,7 +928,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
               ) : (
                 <table className="w-full text-[13px]" style={{ minWidth: 520 }}>
                   <thead>
-                    <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200">
+                    <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-800 border-b border-slate-200">
                       <th className="px-4 py-2.5">When</th>
                       <th className="px-4 py-2.5">User</th>
                       <th className="px-4 py-2.5">Action</th>

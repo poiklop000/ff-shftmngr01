@@ -28,6 +28,14 @@ function toggleClass(state: ToggleState): string {
   return state === 1 ? 'pass' : state === 2 ? 'issue' : 'neutral';
 }
 
+function yieldColors(raw: string): { color: string; fontWeight: number } | null {
+  const val = (raw || '').replace(/%/g, '').trim();
+  if (val === '') return null;
+  return parseFloat(val) < 97.0
+    ? { color: '#b91c1c', fontWeight: 700 }
+    : { color: '#166534', fontWeight: 700 };
+}
+
 /**
  * Renders the shift board exactly as it appears in the printed report. Used by
  * the Analytics saved-record report modal so a saved report looks identical to
@@ -123,7 +131,7 @@ export function ShiftReport({ shift, date, hours, boardData, notes, sku, downtim
       )}
 
       <div className="table-wrapper report-table-scroll">
-        <table className="report-table">
+        <table>
           <thead>
             <tr>
               <th>Time Interval</th>
@@ -151,6 +159,10 @@ export function ShiftReport({ shift, date, hours, boardData, notes, sku, downtim
                 const out = parseNumber(r.out);
                 const spd = parseNumber(r.spd);
                 const oee = out > 0 && spd > 0 ? (out / spd) * 100 : 0;
+                const oeeClass = out > 0 && spd > 0
+                  ? oee >= 70 ? 'oee-pass' : 'oee-fail'
+                  : 'oee-neutral';
+                const yieldStyle = yieldColors(r.yld);
                 return (
                   <tr key={i}>
                     <td style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', color: '#334155' }}>
@@ -158,11 +170,19 @@ export function ShiftReport({ shift, date, hours, boardData, notes, sku, downtim
                     </td>
                     <td>{r.spd || '0'}</td>
                     <td>{r.out || '0'}</td>
-                    <td>{out > 0 && spd > 0 ? `${oee.toFixed(2)}%` : '0.00%'}</td>
-                    <td><span className={`report-toggle ${toggleClass(r.q)}`}>{toggleLabel(r.q)}</span></td>
-                    <td><span className={`report-toggle ${toggleClass(r.s)}`}>{toggleLabel(r.s)}</span></td>
+                    <td>
+                      <span className={`oee-badge ${oeeClass}`}>
+                        {out > 0 && spd > 0 ? `${oee.toFixed(2)}%` : '0.00%'}
+                      </span>
+                    </td>
+                    <td><span className={`toggle-btn ${toggleClass(r.q)}`}>{toggleLabel(r.q)}</span></td>
+                    <td><span className={`toggle-btn ${toggleClass(r.s)}`}>{toggleLabel(r.s)}</span></td>
                     <td style={{ textAlign: 'left', whiteSpace: 'pre-wrap' }}>{r.log || '-'}</td>
-                    <td>{r.yld || '-'}</td>
+                    <td>
+                      <span style={yieldStyle ? { color: yieldStyle.color, fontWeight: yieldStyle.fontWeight } : undefined}>
+                        {r.yld || '-'}
+                      </span>
+                    </td>
                     <td>{r.scr || '-'}</td>
                   </tr>
                 );

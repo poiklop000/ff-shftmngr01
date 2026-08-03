@@ -5,7 +5,16 @@ import {
   type CalcInputs,
 } from '@/types';
 import { useAutoSelect, useEnterToNext } from '@/lib/ui';
+import { fetchOfsStatus, type OfsLiveStatus } from '@/lib/ofs';
 import { PageHelp } from '@/components/PageHelp';
+
+const PRODUCT_REFRESH_MS = 5000;
+
+function activeJobProduct(status: OfsLiveStatus | null): string {
+  const order = status?.job?.$order;
+  const product = order?.$product;
+  return product?.description || order?.name || '';
+}
 
 interface CalculatorViewProps {
   calc: CalcInputs;
@@ -15,7 +24,7 @@ interface CalculatorViewProps {
 }
 
 const FIELD_ORDER: (keyof CalcInputs)[] = [
-  'product', 'size', 'plan', 'speed', 'uvol', 'mvol', 'ratio',
+  'size', 'plan', 'speed', 'uvol', 'mvol', 'ratio',
   'counter', 'bowl', 'layer', 'pallet',
 ];
 
@@ -27,6 +36,29 @@ const FIELD_IDS: Record<keyof CalcInputs, string> = {
 
 export function CalculatorView({ calc, onChange, onUpdate, onClear }: CalculatorViewProps) {
   const [clockTick, setClockTick] = useState(0);
+  const [liveStatus, setLiveStatus] = useState<OfsLiveStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    const load = async () => {
+      try {
+        const data = await fetchOfsStatus();
+        if (!cancelled) setLiveStatus(data);
+      } catch {
+        // keep last known product when OFS is unreachable
+      } finally {
+        if (!cancelled) timer = window.setTimeout(load, PRODUCT_REFRESH_MS);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, []);
+
+  const activeProduct = activeJobProduct(liveStatus);
 
   const metrics = useMemo(() => {
     void clockTick;
@@ -85,7 +117,7 @@ export function CalculatorView({ calc, onChange, onUpdate, onClear }: Calculator
           {
             title: "Filling in the inputs",
             items: [
-              "Product - type the product name for the current run.",
+              "Product - pulled automatically from the active job on the Live page. No manual entry needed.",
               "Can Size - pick the package size in litres (0.250, 0.330, 0.355, 0.440, or 0.500).",
               "Total Plan - the total quantity you plan to produce this run.",
               "Filler Speed - the rated speed of the filler in cans per hour.",
@@ -115,14 +147,13 @@ export function CalculatorView({ calc, onChange, onUpdate, onClear }: Calculator
 
       <div className="card card-green">
         <h3>Production Summary</h3>
-        <Row label="Product:" value={calc.product.trim() || '-'} />
+        <Row label="Product:" value={activeProduct.trim() || calc.product.trim() || '-'} />
         <Row label="Running Yield:" value={`${metrics.yieldPct.toFixed(2)}%`} valueClass={yieldClass} />
         <Row label="Estimated Final Count:" value={metrics.finalCount} />
         <Row label="Estimated Finish Time:" value={metrics.finishTime} />
       </div>
 
       <div className="section-panel">
-        <CalcField label="Product" field="product" calc={calc} onChange={onChange} type="text" placeholder="Enter product name..." />
         <SelectField label="Can Size" field="size" calc={calc} onChange={onChange} />
         <CalcField label="Total Plan" field="plan" calc={calc} onChange={onChange} type="text" inputMode="numeric" placeholder="0" formatOnBlur />
         <CalcField label="Filler Speed" field="speed" calc={calc} onChange={onChange} type="text" inputMode="decimal" placeholder="0" formatOnBlur />
@@ -187,7 +218,7 @@ function CalcField({ label, field, calc, onChange, type, inputMode, placeholder,
   const ref = useRef<HTMLInputElement>(null);
   const id = FIELD_IDS[field];
   const idx = FIELD_ORDER.indexOf(field);
-  const nextId = idx < FIELD_ORDER.length - 1 ? FIELD_IDS[FIELD_ORDER[idx + 1]] : FIELD_IDS.product;
+  const nextId = idx < FIELD_ORDER.length - 1 ? FIELD_IDS[FIELD_ORDER[idx + 1]] : FIELD_IDS[FIELD_ORDER[0]];
 
   useAutoSelect(ref, [field]);
   useEnterToNext(ref, nextId, [field]);
@@ -219,7 +250,7 @@ function SelectField({ label, field, calc, onChange }: {
   const ref = useRef<HTMLSelectElement>(null);
   const id = FIELD_IDS[field];
   const idx = FIELD_ORDER.indexOf(field);
-  const nextId = idx < FIELD_ORDER.length - 1 ? FIELD_IDS[FIELD_ORDER[idx + 1]] : FIELD_IDS.product;
+  const nextId = idx < FIELD_ORDER.length - 1 ? FIELD_IDS[FIELD_ORDER[idx + 1]] : FIELD_IDS[FIELD_ORDER[0]];
 
   useEffectEnterToNextSelect(ref, nextId);
 

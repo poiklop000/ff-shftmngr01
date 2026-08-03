@@ -174,8 +174,13 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Endpoint not permitted" }, 400);
     }
 
-    // Both live/spans and data/summary/hour accept start/end query params
-    const usesDateQuery = endpoint === "live/spans" || endpoint === "data/summary/hour";
+    // live/spans, data/summary/hour and data/express/spans accept start/end
+    // query params so the client can request only the window it needs instead
+    // of downloading the full span history on every load.
+    const usesDateQuery =
+      endpoint === "live/spans" ||
+      endpoint === "data/summary/hour" ||
+      endpoint === "data/express/spans";
     const result = await fetchApi(
       `/${endpoint}`,
       auth,

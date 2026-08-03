@@ -158,6 +158,33 @@ async function fetchOfsEndpoint<T>(
   return json.data as T;
 }
 
+// Short-TTL in-memory cache for the slow OFS calls (express spans + hour
+// summary). Revisiting the same page or re-rendering within the TTL reuses the
+// cached payload instead of re-downloading the whole OFS history each time.
+interface CacheEntry<T> {
+  value: T;
+  expiresAt: number;
+}
+
+const ofsCache = new Map<string, CacheEntry<unknown>>();
+
+function ofsCacheGet<T>(key: string): T | null {
+  const entry = ofsCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    ofsCache.delete(key);
+    return null;
+  }
+  return entry.value as T;
+}
+
+function ofsCacheSet<T>(key: string, value: T, ttlMs: number): void {
+  ofsCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+}
+
+const EXPRESS_SPANS_CACHE_TTL_MS = 60_000;
+const HOUR_SUMMARY_CACHE_TTL_MS = 30_000;
+
 const OFS_FETCH_TIMEOUT_MS = 15000;
 
 /**
@@ -275,9 +302,23 @@ interface ExpressSpansResponse {
   spans: ExpressSpan[];
 }
 
-export async function fetchExpressSpans(signal?: AbortSignal): Promise<ExpressSpan[]> {
-  const data = await fetchOfsEndpoint<ExpressSpansResponse>("data/express/spans", signal);
-  return data.spans ?? [];
+export async function fetchExpressSpans(
+  start?: number,
+  end?: number,
+  signal?: AbortSignal,
+): Promise<ExpressSpan[]> {
+  const key = `express_spans:${start ?? 'all'}:${end ?? 'all'}`;
+  const cached = ofsCacheGet<ExpressSpan[]>(key);
+  if (cached) return cached;
+
+  let endpoint = "data/express/spans";
+  if (start !== undefined && end !== undefined) {
+    endpoint += `&start=${start}&end=${end}`;
+  }
+  const data = await fetchOfsEndpoint<ExpressSpansResponse>(endpoint, signal);
+  const spans = data.spans ?? [];
+  ofsCacheSet(key, spans, EXPRESS_SPANS_CACHE_TTL_MS);
+  return spans;
 }
 
 export interface OfsHourSummaryCounts {
@@ -311,6 +352,10 @@ export async function fetchHourlySummary(
   endDate?: string,
   signal?: AbortSignal,
 ): Promise<OfsHourSummaryData> {
+  const key = `hour_summary:${startDate ?? 'all'}:${endDate ?? 'all'}`;
+  const cached = ofsCacheGet<OfsHourSummaryData>(key);
+  if (cached) return cached;
+
   let url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ofs-status?endpoint=data/summary/hour`;
   if (startDate && endDate) {
     const { start, end } = dateStrToEpochRange(startDate, endDate);
@@ -320,7 +365,9 @@ export async function fetchHourlySummary(
   if (!json || !json.data) {
     throw new Error(json?.error || "Unexpected response from server function");
   }
-  return json.data as OfsHourSummaryData;
+  const data = json.data as OfsHourSummaryData;
+  ofsCacheSet(key, data, HOUR_SUMMARY_CACHE_TTL_MS);
+  return data;
 }
 
 // Convert YYYY-MM-DD date strings to epoch ms range in the OFS console

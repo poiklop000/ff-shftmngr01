@@ -248,7 +248,7 @@ async function fetchDowntimeBetweenEpochs(
   rangeEnd: number,
 ): Promise<DowntimeEvent[]> {
   const [spans, dbEvents] = await Promise.all([
-    fetchExpressSpans(),
+    fetchExpressSpans(rangeStart, rangeEnd),
     fetchDbEventsInEpochRange(rangeStart, rangeEnd),
   ]);
 

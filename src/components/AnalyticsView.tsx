@@ -235,6 +235,23 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
     [data],
   );
 
+  const downtimeByCategory = useMemo(() => {
+    const map = new Map<string, { ms: number; count: number }>();
+    for (const e of downtime) {
+      const key = e.category ?? e.reason ?? 'Unknown';
+      const entry = map.get(key) ?? { ms: 0, count: 0 };
+      entry.ms += e.duration_ms ?? 0;
+      entry.count += 1;
+      map.set(key, entry);
+    }
+    return Array.from(map.entries())
+      .map(([category, { ms, count }]) => ({ category, ms, count }))
+      .sort((a, b) => b.ms - a.ms)
+      .slice(0, 8);
+  }, [downtime]);
+
+  const maxCategoryMs = downtimeByCategory.reduce((m, c) => Math.max(m, c.ms), 0);
+
   const hourLabels = useMemo(() => {
     if (!data) return [];
     return data.hourly.map((h) => {
@@ -308,6 +325,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
           {
             title: "Charts",
             items: [
+              "Top downtime by category - horizontal bars ranking the categories with the most time lost.",
               "Output per hour - vertical bars showing how many units each hour produced across the range.",
               "Job progress - one bar per job showing how far it got toward its target quantity.",
             ],
@@ -609,6 +627,34 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
               </div>
             )}
           </div>
+
+          {/* Top downtime by category chart */}
+          {downtimeByCategory.length > 0 && (
+            <div className="card card-blue">
+              <h3>Top Downtime by Category</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {downtimeByCategory.map(({ category, ms, count }, i) => (
+                  <div key={category}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, marginBottom: 2 }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>{category}</span>
+                      <span>{formatDuration(ms)} · {count} {count === 1 ? 'event' : 'events'}</span>
+                    </div>
+                    <div style={{ width: '100%', height: 12, backgroundColor: '#e2e8f0', borderRadius: 6, overflow: 'hidden' }}>
+                      <div
+                        style={{
+                          width: `${maxCategoryMs > 0 ? (ms / maxCategoryMs) * 100 : 0}%`,
+                          height: '100%',
+                          backgroundColor: barColor(i),
+                          borderRadius: 6,
+                          transition: 'width 0.3s ease',
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Hourly production */}
           <div className="card card-green">

@@ -437,8 +437,9 @@ export function computeDowntimeLogs(
       .sort((a, b) => a.startMin - b.startMin)
       .map((g) => {
         const countLabel = g.count > 1 ? `${g.label} (${g.count}x)` : g.label;
-        return g.comments.length > 0
-          ? `${countLabel}\n    *(${g.comments.join('; ')})`
+        const uniqueComments = Array.from(new Set(g.comments));
+        return uniqueComments.length > 0
+          ? `${countLabel}\n    *(${uniqueComments.join('; ')})`
           : countLabel;
       })
       .join('\n');

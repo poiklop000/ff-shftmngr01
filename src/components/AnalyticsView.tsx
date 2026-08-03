@@ -246,8 +246,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
     }
     return Array.from(map.entries())
       .map(([category, { ms, count }]) => ({ category, ms, count }))
-      .sort((a, b) => b.ms - a.ms)
-      .slice(0, 8);
+      .sort((a, b) => b.ms - a.ms);
   }, [downtime]);
 
   const maxCategoryMs = downtimeByCategory.reduce((m, c) => Math.max(m, c.ms), 0);
@@ -325,7 +324,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
           {
             title: "Charts",
             items: [
-              "Top downtime by category - horizontal bars ranking the categories with the most time lost.",
+              "Downtime by category - horizontal bars ranking the categories with the most time lost.",
               "Output per hour - vertical bars showing how many units each hour produced across the range.",
               "Job progress - one bar per job showing how far it got toward its target quantity.",
             ],
@@ -631,7 +630,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
           {/* Top downtime by category chart */}
           {downtimeByCategory.length > 0 && (
             <div className="card card-blue">
-              <h3>Top Downtime by Category</h3>
+              <h3>Downtime by Category</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {downtimeByCategory.map(({ category, ms, count }, i) => (
                   <div key={category}>

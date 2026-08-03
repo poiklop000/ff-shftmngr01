@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Boxes,
   Clock,
+  Database,
   Gauge,
   Loader2,
   Package,
@@ -11,6 +12,7 @@ import {
   TrendingUp,
   User as UserIcon,
 } from 'lucide-react';
+import { syncAllData } from '@/lib/captureSync';
 import { fetchOfsStatus, classifyLineState, LINE_STATE_COLORS, type OfsLiveStatus, type OfsRunState, type LineStateClass } from '@/lib/ofs';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
 import { fetchDowntimeByDate, type DowntimeEvent } from '@/lib/downtime';
@@ -57,6 +59,9 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [downtimeEvents, setDowntimeEvents] = useState<DowntimeEvent[]>([]);
   const [downtimeLoading, setDowntimeLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
@@ -176,6 +181,27 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
     [summary, currentShift, customHours, date],
   );
 
+  const handleSync = useCallback(async () => {
+    setSyncing(true);
+    setSyncMessage(null);
+    setSyncError(null);
+    try {
+      const outcome = await syncAllData();
+      setSyncMessage(
+        outcome.allOk
+          ? 'Sync complete — downtime, counters and jobs updated.'
+          : `Sync finished with issues: ${outcome.results.filter((r) => !r.ok).map((r) => `${r.name} (${r.status ?? r.error ?? 'failed'})`).join(', ')}.`,
+      );
+      if (outcome.allOk) {
+        await Promise.all([loadDowntime(date), loadSummary(date)]);
+      }
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSyncing(false);
+    }
+  }, [date, loadDowntime, loadSummary]);
+
   const totalIn = useMemo(() => shiftSummary.reduce((s, e) => s + e.in, 0), [shiftSummary]);
   const totalOut = useMemo(() => shiftSummary.reduce((s, e) => s + e.out, 0), [shiftSummary]);
 
@@ -256,8 +282,28 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             Refresh
           </button>
+          <button
+            type="button"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-md text-[12px] font-bold text-white bg-indigo-700 hover:bg-indigo-600 transition-colors"
+            onClick={handleSync}
+            disabled={syncing}
+          >
+            {syncing ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
+            Sync Data
+          </button>
         </div>
       </div>
+
+      {syncMessage && (
+        <div className="rounded-lg p-3 mb-4 border border-green-200 bg-green-50 text-green-800 text-[12px] font-semibold">
+          {syncMessage}
+        </div>
+      )}
+      {syncError && (
+        <div className="rounded-lg p-3 mb-4 border border-red-200 bg-red-50 text-red-800 text-[12px] font-semibold">
+          Sync failed: {syncError}
+        </div>
+      )}
 
       {error && (
         <div className="flex items-start gap-3 rounded-lg p-4 mb-4 border border-red-200 bg-red-50 text-red-800">

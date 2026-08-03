@@ -122,12 +122,24 @@ function getOfsAuth(): string {
 
 // --- express/spans fetch + mapping ---
 
+// Hourly syncs only pull a rolling window instead of the full OFS history
+// (full pull is ~289KB / ~51s). 7 days keeps recent events + comments fresh
+// at a fraction of the payload. Operator comments added to events older than
+// the window are still visible in the app because the Analytics/Downtime
+// pages read express spans live from OFS, not from this table.
+const SYNC_HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
 async function fetchSpansHistory(): Promise<ExpressSpan[]> {
   const auth = getOfsAuth();
-  const res = await fetch(`${OFS_BASE}${SERVER_PATH}/data/express/spans`, {
-    method: "GET",
-    headers: { Authorization: auth, Accept: "application/json" },
-  });
+  const start = Date.now() - SYNC_HISTORY_WINDOW_MS;
+  const end = Date.now();
+  const res = await fetch(
+    `${OFS_BASE}${SERVER_PATH}/data/express/spans?start=${start}&end=${end}`,
+    {
+      method: "GET",
+      headers: { Authorization: auth, Accept: "application/json" },
+    },
+  );
   if (!res.ok) throw new Error(`OFS data/express/spans returned ${res.status}`);
   const data = (await res.json()) as ExpressSpansResponse;
   return data.spans ?? [];

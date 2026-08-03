@@ -522,12 +522,29 @@ function epochToConsoleTime(
             )}
             <button
               type="button"
-              className="app-bar-settings-btn"
               onClick={handleSignOut}
               aria-label="Sign out"
               title="Sign out"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                border: '1px solid rgba(255,255,255,0.45)',
+                background: 'rgba(255,255,255,0.15)',
+                color: '#ffffff',
+                fontWeight: 700,
+                fontSize: 13,
+                borderRadius: 999,
+                padding: '6px 14px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                transition: 'background-color 0.2s, transform 0.1s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(255,255,255,0.28)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(255,255,255,0.15)'; }}
             >
-              <LogOut size={20} />
+              <LogOut size={16} />
+              Logout
             </button>
             <button
               type="button"

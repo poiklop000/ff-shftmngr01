@@ -699,7 +699,7 @@ function epochToConsoleTime(
         ))}
       </nav>
 
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} isAdmin={profile?.role === 'admin'} />
     </div>
   );
 }

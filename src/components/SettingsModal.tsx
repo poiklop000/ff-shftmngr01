@@ -6,9 +6,10 @@ import { changePassword } from '@/lib/auth';
 interface SettingsModalProps {
   open: boolean;
   onClose: () => void;
+  isAdmin: boolean;
 }
 
-export function SettingsModal({ open, onClose }: SettingsModalProps) {
+export function SettingsModal({ open, onClose, isAdmin }: SettingsModalProps) {
   const [webhookUrl, setWebhookUrl] = useState('');
   const [enabled, setEnabled] = useState(false);
   const [threshold, setThreshold] = useState('10');
@@ -30,6 +31,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     let cancelled = false;
     setPwError(null);
     setPwSaved(false);
+    if (!isAdmin) {
+      setLoading(false);
+      return () => { cancelled = true; };
+    }
     (async () => {
       setLoading(true);
       setError(null);
@@ -74,7 +79,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       }
     })();
     return () => { cancelled = true; };
-  }, [open]);
+  }, [open, isAdmin]);
 
   const handleSave = useCallback(async () => {
     const trimmed = webhookUrl.trim();
@@ -150,16 +155,18 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>Microsoft Teams Alert Settings</h2>
+          <h2>Settings</h2>
           <button type="button" className="modal-close-btn" onClick={onClose} aria-label="Close">
             <X size={20} />
           </button>
         </div>
 
-        {loading ? (
+        {isAdmin && loading ? (
           <p className="modal-loading">Loading settings…</p>
         ) : (
           <>
+            {isAdmin && (
+              <>
             <p className="modal-description">
               Get a Microsoft Teams message when a downtime event starts and when it ends.
               Create an incoming webhook in your Teams channel (Apps → Workflows → Post to a channel
@@ -259,6 +266,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 <Send size={15} /> {saving ? 'Saving…' : 'Save Settings'}
               </button>
             </div>
+              </>
+            )}
 
             <div style={{ marginTop: 26, paddingTop: 18, borderTop: '1px solid var(--border-color, rgba(255,255,255,0.08))' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, fontSize: 14, marginBottom: 4 }}>

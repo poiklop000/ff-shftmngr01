@@ -521,7 +521,7 @@ function epochToConsoleTime(
     <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc', color: '#1e293b' }}>
       <div className="app-bar">
         <div className="app-bar-inner">
-          <span className="app-bar-title">Krones Canning Line<br />Console</span>
+          <span className="app-bar-title">Free-Flow Manufacturing<br />Krones Canning Line Console</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {profile && (
               <span style={{ fontSize: 13, fontWeight: 700, color: '#ffffff', background: 'rgba(255,255,255,0.18)', borderRadius: 999, padding: '5px 12px' }}>

@@ -54,10 +54,10 @@ export function LoginView({ onSuccess }: LoginViewProps) {
       >
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
           <div style={{ fontWeight: 800, fontSize: 18, color: '#0f172a', lineHeight: 1.3 }}>
-            Krones Canning Line
+            Free-Flow Manufacturing
           </div>
           <div style={{ fontWeight: 700, fontSize: 14, color: '#0d47a1', marginTop: 2 }}>
-            Console
+            Krones Canning Line Console
           </div>
           <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>Sign in to continue</div>
         </div>

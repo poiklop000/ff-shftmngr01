@@ -2,11 +2,13 @@ import { supabase } from '@/lib/supabase';
 
 const APP_DOMAIN = '@app.local';
 
+export type Role = 'admin' | 'manager' | 'team_lead' | 'operator';
+
 export interface AppProfile {
   user_id: string;
   username: string;
   display_name: string;
-  role: 'admin' | 'operator';
+  role: Role;
   is_active: boolean;
   created_at: string;
 }
@@ -68,7 +70,7 @@ export async function adminListUsers(): Promise<AppProfile[]> {
   return users;
 }
 
-export async function adminCreateUser(input: { username: string; password: string; displayName: string; role: 'admin' | 'operator' }): Promise<AppProfile> {
+export async function adminCreateUser(input: { username: string; password: string; displayName: string; role: Role }): Promise<AppProfile> {
   const { user } = await callAdmin<{ user: AppProfile }>({ action: 'create', ...input });
   return user;
 }
@@ -81,7 +83,7 @@ export async function adminSetActive(userId: string, isActive: boolean): Promise
   await callAdmin<{ ok: true }>({ action: 'set-active', userId, isActive });
 }
 
-export async function adminUpdateUser(userId: string, patch: { displayName?: string; role?: 'admin' | 'operator' }): Promise<void> {
+export async function adminUpdateUser(userId: string, patch: { displayName?: string; role?: Role }): Promise<void> {
   await callAdmin<{ ok: true }>({ action: 'update', userId, ...patch });
 }
 

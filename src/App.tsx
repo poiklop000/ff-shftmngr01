@@ -9,7 +9,7 @@ import { MonitoringView } from '@/components/MonitoringView';
 import { SettingsModal } from '@/components/SettingsModal';
 import { LoginView } from '@/components/LoginView';
 import { AdminView } from '@/components/AdminView';
-import { signOut, fetchProfile, type AppProfile } from '@/lib/auth';
+import { signOut, fetchProfile, type AppProfile, type Role } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
   computeHourlyOutputs,
@@ -38,6 +38,14 @@ import { fetchOfsStatus } from '@/lib/ofs';
 type View = 'calculator' | 'tracker' | 'live' | 'downtime' | 'analytics' | 'admin';
 const VIEW_KEY = 'canning_calc_view';
 const VALID_VIEWS: View[] = ['calculator', 'tracker', 'live', 'downtime', 'analytics', 'admin'];
+
+// Pages each role is allowed to open.
+const ROLE_ACCESS: Record<Role, View[]> = {
+  operator: ['live', 'downtime', 'calculator'],
+  team_lead: ['live', 'tracker', 'downtime', 'calculator'],
+  manager: ['live', 'tracker', 'downtime', 'calculator', 'analytics'],
+  admin: ['live', 'tracker', 'downtime', 'calculator', 'analytics', 'admin'],
+};
 
 // Deep-clone the data for an immutable update, but keep the customHours array
 // reference stable. Without this, every edit gives customHours a new identity,
@@ -496,18 +504,18 @@ function epochToConsoleTime(
   }
 
   const currentUserId = session.user.id;
-  const effectiveView: View = view === 'admin' && profile?.role !== 'admin' ? 'live' : view;
+  const allowedViews = profile ? (ROLE_ACCESS[profile.role] ?? ROLE_ACCESS.operator) : ROLE_ACCESS.operator;
+  const effectiveView: View = allowedViews.includes(view) ? view : allowedViews[0]!;
 
-  const navItems: { id: View; label: string; Icon: LucideIcon }[] = [
+  const ALL_NAV: { id: View; label: string; Icon: LucideIcon }[] = [
     { id: 'live', label: 'Live', Icon: Activity },
     { id: 'tracker', label: 'Monitoring', Icon: ClipboardList },
     { id: 'downtime', label: 'Downtime', Icon: TimerOff },
     { id: 'calculator', label: 'Calculator', Icon: Calculator },
     { id: 'analytics', label: 'Analytics', Icon: BarChart3 },
+    { id: 'admin', label: 'Admin', Icon: Shield },
   ];
-  if (profile?.role === 'admin') {
-    navItems.push({ id: 'admin', label: 'Admin', Icon: Shield });
-  }
+  const navItems = ALL_NAV.filter((n) => allowedViews.includes(n.id));
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc', color: '#1e293b' }}>
@@ -625,28 +633,28 @@ function epochToConsoleTime(
       </div>
 
       <div className="sm-container" style={{ paddingTop: 20, paddingBottom: 80 }}>
-        {view === 'calculator' ? (
+        {effectiveView === 'calculator' ? (
           <CalculatorView
             calc={calcMemo}
             onChange={handleCalcChange}
             onUpdate={handleCalcUpdate}
             onClear={handleCalcClear}
           />
-        ) : view === 'live' ? (
+        ) : effectiveView === 'live' ? (
           <LiveLineStatus
             currentShift={data.shift}
             customHours={data.customHours}
             date={data.date}
           />
-        ) : view === 'downtime' ? (
+        ) : effectiveView === 'downtime' ? (
           <DowntimeHistory
             date={data.date}
             currentShift={data.shift}
             customHours={data.customHours}
           />
-        ) : view === 'analytics' ? (
+        ) : effectiveView === 'analytics' ? (
           <AnalyticsView onOpenRecord={handleOpenRecordFromAnalytics} />
-        ) : view === 'admin' && profile?.role === 'admin' ? (
+        ) : effectiveView === 'admin' ? (
           <AdminView currentUserId={currentUserId} />
         ) : (
           <MonitoringView

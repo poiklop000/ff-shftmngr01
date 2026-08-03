@@ -23,6 +23,12 @@ const corsHeaders = {
 
 const APP_DOMAIN = "@app.local";
 const USERNAME_RE = /^[A-Za-z0-9_.-]{1,50}$/;
+const VALID_ROLES = ["admin", "manager", "team_lead", "operator"] as const;
+type Role = (typeof VALID_ROLES)[number];
+
+function normalizeRole(value: unknown): Role {
+  return VALID_ROLES.includes(value as Role) ? (value as Role) : "operator";
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -91,7 +97,7 @@ Deno.serve(async (req: Request) => {
 
     if (action === "create") {
       const { username, password, displayName } = validateCredentials(body.username ?? "", body.password ?? "", body.displayName ?? "");
-      const role = body.role === "admin" ? "admin" : "operator";
+      const role = normalizeRole(body.role);
       const email = `${username.toLowerCase()}${APP_DOMAIN}`;
 
       const { data: created, error: cErr } = await admin.auth.admin.createUser({
@@ -145,7 +151,7 @@ Deno.serve(async (req: Request) => {
         if (!dn || dn.length > 100) return json({ error: "Display name is required (max 100 chars)" }, 400);
         patch.display_name = dn;
       }
-      if (body.role !== undefined) patch.role = body.role === "admin" ? "admin" : "operator";
+      if (body.role !== undefined) patch.role = normalizeRole(body.role);
       if (Object.keys(patch).length === 0) return json({ error: "Nothing to update" }, 400);
       const { error } = await admin.from("profiles").update(patch).eq("user_id", targetId);
       if (error) return json({ error: error.message }, 400);

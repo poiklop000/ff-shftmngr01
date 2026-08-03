@@ -8,14 +8,24 @@ import {
   adminSetActive,
   adminUpdateUser,
   type AppProfile,
+  type Role,
 } from '@/lib/auth';
 
 interface AdminViewProps {
   currentUserId: string;
 }
 
-const ROLE_COLORS: Record<'admin' | 'operator', { bg: string; color: string }> = {
+const ROLE_OPTIONS: { value: Role; label: string }[] = [
+  { value: 'operator', label: 'Operator' },
+  { value: 'team_lead', label: 'Team Lead' },
+  { value: 'manager', label: 'Manager' },
+  { value: 'admin', label: 'Admin' },
+];
+
+const ROLE_COLORS: Record<Role, { bg: string; color: string }> = {
   admin: { bg: '#eff6ff', color: '#1e40af' },
+  manager: { bg: '#fdf4ff', color: '#86198f' },
+  team_lead: { bg: '#fffbeb', color: '#b45309' },
   operator: { bg: '#f0fdf4', color: '#166534' },
 };
 
@@ -29,12 +39,12 @@ export function AdminView({ currentUserId }: AdminViewProps) {
   const [name, setName] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<'admin' | 'operator'>('operator');
+  const [role, setRole] = useState<Role>('operator');
   const [showAdd, setShowAdd] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDisplayName, setEditDisplayName] = useState('');
-  const [editRole, setEditRole] = useState<'admin' | 'operator'>('operator');
+  const [editRole, setEditRole] = useState<Role>('operator');
   const [resetId, setResetId] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState('');
 
@@ -224,9 +234,10 @@ export function AdminView({ currentUserId }: AdminViewProps) {
               </div>
               <div className="input-group" style={{ maxWidth: 'none' }}>
                 <label>Role</label>
-                <select className="form-control" value={role} onChange={(e) => setRole(e.target.value as 'admin' | 'operator')} disabled={busy}>
-                  <option value="operator">Operator</option>
-                  <option value="admin">Admin</option>
+                <select className="form-control" value={role} onChange={(e) => setRole(e.target.value as Role)} disabled={busy}>
+                  {ROLE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -285,9 +296,10 @@ export function AdminView({ currentUserId }: AdminViewProps) {
                     </div>
                     <div className="input-group" style={{ maxWidth: 'none' }}>
                       <label>Role</label>
-                      <select className="form-control" value={editRole} onChange={(e) => setEditRole(e.target.value as 'admin' | 'operator')} disabled={busy}>
-                        <option value="operator">Operator</option>
-                        <option value="admin">Admin</option>
+                      <select className="form-control" value={editRole} onChange={(e) => setEditRole(e.target.value as Role)} disabled={busy}>
+                        {ROLE_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
                       </select>
                     </div>
                   </div>

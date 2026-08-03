@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Calculator, ClipboardList, Activity, TimerOff, Settings, Calendar, Clock, BarChart3 } from 'lucide-react';
+import { Calculator, ClipboardList, Activity, TimerOff, Settings, Calendar, Clock, BarChart3, Shield, LogOut } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { AnalyticsView } from '@/components/AnalyticsView';
 import { CalculatorView } from '@/components/CalculatorView';
 import { DowntimeHistory } from '@/components/DowntimeHistory';
 import { LiveLineStatus } from '@/components/LiveLineStatus';
 import { MonitoringView } from '@/components/MonitoringView';
 import { SettingsModal } from '@/components/SettingsModal';
+import { LoginView } from '@/components/LoginView';
+import { AdminView } from '@/components/AdminView';
+import { signOut, fetchProfile, type AppProfile } from '@/lib/auth';
+import { supabase } from '@/lib/supabase';
 import {
   computeHourlyOutputs,
   computeDowntimeLogs,
@@ -30,9 +35,9 @@ import { fetchDowntimeByDate } from '@/lib/downtime';
 import { saveMonitoringRecord, loadMonitoringRecord, buildActiveJobSnapshot, type ActiveJobSnapshot } from '@/lib/monitoring';
 import { fetchOfsStatus } from '@/lib/ofs';
 
-type View = 'calculator' | 'tracker' | 'live' | 'downtime' | 'analytics';
+type View = 'calculator' | 'tracker' | 'live' | 'downtime' | 'analytics' | 'admin';
 const VIEW_KEY = 'canning_calc_view';
-const VALID_VIEWS: View[] = ['calculator', 'tracker', 'live', 'downtime', 'analytics'];
+const VALID_VIEWS: View[] = ['calculator', 'tracker', 'live', 'downtime', 'analytics', 'admin'];
 
 // Deep-clone the data for an immutable update, but keep the customHours array
 // reference stable. Without this, every edit gives customHours a new identity,
@@ -53,6 +58,47 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [hasSavedRecord, setHasSavedRecord] = useState(false);
+
+  const [authReady, setAuthReady] = useState(false);
+  const [session, setSession] = useState<Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session']>(null);
+  const [profile, setProfile] = useState<AppProfile | null>(null);
+
+  // Restore the persisted auth session and keep it in sync with Supabase.
+  // Sessions persist in localStorage, so users stay signed in across visits.
+  useEffect(() => {
+    let mounted = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setSession(data.session);
+      setAuthReady(true);
+      if (data.session) {
+        fetchProfile(data.session.user.id)
+          .then((p) => {
+            if (!mounted) return;
+            if (p && !p.is_active) {
+              setProfile(null);
+              supabase.auth.signOut();
+            } else {
+              setProfile(p);
+            }
+          })
+          .catch(() => { if (mounted) setProfile(null); });
+      }
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s);
+      if (!s) setProfile(null);
+    });
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleSignOut = async () => {
+    await signOut();
+    setProfile(null);
+  };
 
   useEffect(() => {
     saveAppData(data);
@@ -435,19 +481,63 @@ function epochToConsoleTime(
 
   const calcMemo = useMemo(() => data.calc, [data.calc]);
 
+  // Login gate: show a loading splash while the persisted session is restored,
+  // then the login screen until a valid session exists.
+  if (!authReady) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc', color: '#1e293b' }}>
+        <div style={{ fontWeight: 700, color: '#64748b' }}>Loading...</div>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <LoginView onSuccess={(p) => setProfile(p)} />;
+  }
+
+  const currentUserId = session.user.id;
+  const effectiveView: View = view === 'admin' && profile?.role !== 'admin' ? 'live' : view;
+
+  const navItems: { id: View; label: string; Icon: LucideIcon }[] = [
+    { id: 'live', label: 'Live', Icon: Activity },
+    { id: 'tracker', label: 'Monitoring', Icon: ClipboardList },
+    { id: 'downtime', label: 'Downtime', Icon: TimerOff },
+    { id: 'calculator', label: 'Calculator', Icon: Calculator },
+    { id: 'analytics', label: 'Analytics', Icon: BarChart3 },
+  ];
+  if (profile?.role === 'admin') {
+    navItems.push({ id: 'admin', label: 'Admin', Icon: Shield });
+  }
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc', color: '#1e293b' }}>
       <div className="app-bar">
         <div className="app-bar-inner">
           <span className="app-bar-title">Free-Flow Manufacturing<br />Shift Manager Console<br />(Beta Testing)</span>
-          <button
-            type="button"
-            className="app-bar-settings-btn"
-            onClick={() => setSettingsOpen(true)}
-            aria-label="Settings"
-          >
-            <Settings size={22} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {profile && (
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#ffffff', background: 'rgba(255,255,255,0.18)', borderRadius: 999, padding: '5px 12px' }}>
+                {profile.display_name}
+              </span>
+            )}
+            <button
+              type="button"
+              className="app-bar-settings-btn"
+              onClick={handleSignOut}
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              <LogOut size={20} />
+            </button>
+            <button
+              type="button"
+              className="app-bar-settings-btn"
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Settings"
+            >
+              <Settings size={22} />
+            </button>
+          </div>
         </div>
 
         <div className="app-bar-controls no-print">
@@ -539,6 +629,8 @@ function epochToConsoleTime(
           />
         ) : view === 'analytics' ? (
           <AnalyticsView onOpenRecord={handleOpenRecordFromAnalytics} />
+        ) : view === 'admin' && profile?.role === 'admin' ? (
+          <AdminView currentUserId={currentUserId} />
         ) : (
           <MonitoringView
             db={data.db}
@@ -567,20 +659,14 @@ function epochToConsoleTime(
       </div>
 
       <nav className={`bottom-tab-bar${keyboardOpen ? ' bottom-tab-bar-hidden' : ''}`} aria-label="Section navigation" aria-hidden={keyboardOpen}>
-        <span className="bottom-tab-indicator" style={{ ['--i' as string]: String(((['live','tracker','downtime','calculator','analytics'] as const).indexOf(view))) }} aria-hidden="true" />
-        {([
-          { id: 'live', label: 'Live', Icon: Activity },
-          { id: 'tracker', label: 'Monitoring', Icon: ClipboardList },
-          { id: 'downtime', label: 'Downtime', Icon: TimerOff },
-          { id: 'calculator', label: 'Calculator', Icon: Calculator },
-          { id: 'analytics', label: 'Analytics', Icon: BarChart3 },
-        ] as const).map(({ id, label, Icon }) => (
+        <span className="bottom-tab-indicator" style={{ ['--i' as string]: String(navItems.findIndex((n) => n.id === effectiveView)) }} aria-hidden="true" />
+        {navItems.map(({ id, label, Icon }) => (
           <button
             key={id}
             type="button"
-            className={`bottom-tab-btn ${view === id ? 'active' : ''}`}
+            className={`bottom-tab-btn ${effectiveView === id ? 'active' : ''}`}
             onClick={() => setView(id)}
-            aria-current={view === id ? 'page' : undefined}
+            aria-current={effectiveView === id ? 'page' : undefined}
           >
             <Icon size={22} aria-hidden="true" />
             <span className="bottom-tab-label">{label}</span>

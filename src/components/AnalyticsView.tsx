@@ -742,8 +742,8 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
                 onClick={() => {
                   downloadCsv(
                     `analytics_records_${loadedRange?.start}_to_${loadedRange?.end}.csv`,
-                    ['Date', 'Shift', 'SKU', 'Active Job', 'Notes', 'Saved By', 'Created At'],
-                    records.map((r) => [r.record_date, r.shift_name, r.active_job?.sku ?? r.sku, r.active_job?.productName ?? '', r.notes, r.saved_by, r.created_at]),
+                    ['Date', 'Shift', 'Saved By'],
+                    records.map((r) => [r.record_date, r.shift_name, r.saved_by]),
                   );
                   setMsg('Records CSV exported');
                 }}
@@ -757,14 +757,11 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
               </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
-                <table className="w-full text-[13px]" style={{ minWidth: 680 }}>
+                <table className="w-full text-[13px]" style={{ minWidth: 420 }}>
                   <thead>
                     <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200">
                       <th className="px-4 py-2.5">Date</th>
                       <th className="px-4 py-2.5">Shift</th>
-                      <th className="px-4 py-2.5">SKU</th>
-                      <th className="px-4 py-2.5">Active Job</th>
-                      <th className="px-4 py-2.5">Notes</th>
                       <th className="px-4 py-2.5">Saved By</th>
                       <th className="px-4 py-2.5"></th>
                     </tr>
@@ -774,9 +771,6 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
                       <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
                         <td className="px-4 py-3 text-slate-700">{r.record_date}</td>
                         <td className="px-4 py-3 text-slate-600">{r.shift_name}</td>
-                        <td className="px-4 py-3 text-slate-600">{r.active_job?.sku ?? (r.sku || '-')}</td>
-                        <td className="px-4 py-3 text-slate-600">{r.active_job?.productName ?? '-'}</td>
-                        <td className="px-4 py-3 text-slate-600" style={{ maxWidth: 240, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.notes || '-'}</td>
                         <td className="px-4 py-3 text-slate-600">{r.saved_by || '-'}</td>
                         <td className="px-4 py-3">
                           <button type="button" className="tab-btn tab-btn-green" style={{ padding: '4px 10px', fontSize: 11, marginRight: 6 }} onClick={() => handleOpenRecord(r)}>

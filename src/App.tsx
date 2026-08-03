@@ -675,7 +675,7 @@ function epochToConsoleTime(
         </div>
       </div>
 
-      <nav className={`bottom-tab-bar${keyboardOpen ? ' bottom-tab-bar-hidden' : ''}`} aria-label="Section navigation" aria-hidden={keyboardOpen}>
+      <nav className={`bottom-tab-bar${keyboardOpen ? ' bottom-tab-bar-hidden' : ''}`} aria-label="Section navigation" aria-hidden={keyboardOpen} style={{ ['--n' as string]: String(navItems.length) }}>
         <span className="bottom-tab-indicator" style={{ ['--i' as string]: String(navItems.findIndex((n) => n.id === effectiveView)) }} aria-hidden="true" />
         {navItems.map(({ id, label, Icon }) => (
           <button

@@ -301,7 +301,7 @@ html {
   top: 6px;
   bottom: 6px;
   left: 6px;
-  width: calc((100% - 12px) / 5);
+  width: calc((100% - 12px) / var(--n, 5));
   border-radius: 16px;
   background-color: #0d47a1;
   box-shadow: 0 4px 14px rgba(13, 71, 161, 0.4);

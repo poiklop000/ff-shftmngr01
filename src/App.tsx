@@ -66,6 +66,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [hasSavedRecord, setHasSavedRecord] = useState(false);
+  const [lastSavedBy, setLastSavedBy] = useState('');
 
   const [authReady, setAuthReady] = useState(false);
   const [session, setSession] = useState<Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session']>(null);
@@ -252,9 +253,15 @@ export default function App() {
     (async () => {
       try {
         const record = await loadMonitoringRecord(data.date, data.shift);
-        if (!cancelled) setHasSavedRecord(!!record);
+        if (!cancelled) {
+          setHasSavedRecord(!!record);
+          setLastSavedBy(record?.saved_by ?? '');
+        }
       } catch {
-        if (!cancelled) setHasSavedRecord(false);
+        if (!cancelled) {
+          setHasSavedRecord(false);
+          setLastSavedBy('');
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -677,6 +684,7 @@ function epochToConsoleTime(
             onSaveRecord={handleSaveRecord}
             onLoadRecord={handleLoadRecord}
             hasSavedRecord={hasSavedRecord}
+            lastSavedBy={lastSavedBy}
           />
         )}
 

@@ -39,6 +39,7 @@ interface MonitoringViewProps {
   onSaveRecord: () => Promise<void>;
   onLoadRecord: () => Promise<void>;
   hasSavedRecord: boolean;
+  lastSavedBy: string;
 }
 
 export function MonitoringView({
@@ -58,6 +59,7 @@ export function MonitoringView({
   onSaveRecord,
   onLoadRecord,
   hasSavedRecord,
+  lastSavedBy,
 }: MonitoringViewProps) {
   const [importingCounter, setImportingCounter] = useState(false);
   const [importingDowntime, setImportingDowntime] = useState(false);
@@ -152,6 +154,13 @@ export function MonitoringView({
   );
 
   const handleSave = async () => {
+    if (hasSavedRecord) {
+      const who = lastSavedBy ? ` (last saved by ${lastSavedBy})` : '';
+      const ok = window.confirm(
+        `WARNING: A saved record already exists for ${SHIFT_LABELS[currentShift]} on ${date}${who}.\n\nSaving now will OVERWRITE the existing record. This cannot be undone.\n\nDo you want to continue?`,
+      );
+      if (!ok) return;
+    }
     setSaving(true);
     setImportMsg(null);
     try {

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { BarChart3, Loader2, FileDown, ExternalLink, RefreshCw, Calendar, Clock, FileText } from 'lucide-react';
+import { BarChart3, Loader2, FileDown, ExternalLink, RefreshCw, Calendar, Clock, FileText, History } from 'lucide-react';
 import { PageHelp } from '@/components/PageHelp';
 import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
 import { ShiftReport } from '@/components/ShiftReport';
@@ -11,7 +11,7 @@ import {
   fetchMonitoringRecordsInRange,
   type JobSnapshotRow,
 } from '@/lib/analytics';
-import type { MonitoringRecord } from '@/lib/monitoring';
+import { fetchRecordAudit, type MonitoringRecord, type MonitoringRecordAudit } from '@/lib/monitoring';
 
 function csvEscape(value: string | number | null | undefined): string {
   const str = String(value ?? '');
@@ -93,6 +93,9 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
   const [msg, setMsg] = useState<string | null>(null);
   const [loadedRange, setLoadedRange] = useState<{ start: string; end: string } | null>(null);
   const [reportRecord, setReportRecord] = useState<MonitoringRecord | null>(null);
+  const [auditRecord, setAuditRecord] = useState<MonitoringRecord | null>(null);
+  const [auditEntries, setAuditEntries] = useState<MonitoringRecordAudit[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
 
   const loadData = useCallback(async (start: string, end: string) => {
     if (!start || !end) {
@@ -139,6 +142,19 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
     setStartAt(st);
     setEndAt(en);
     loadData(st, en);
+  };
+
+  const handleOpenHistory = async (r: MonitoringRecord) => {
+    setAuditRecord(r);
+    setAuditEntries([]);
+    setAuditLoading(true);
+    try {
+      setAuditEntries(await fetchRecordAudit(r.id));
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : 'Failed to load record history');
+    } finally {
+      setAuditLoading(false);
+    }
   };
 
   // Group job snapshots into one row per distinct OFS job.
@@ -779,6 +795,9 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
                           <button type="button" className="tab-btn tab-btn-blue" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => setReportRecord(r)}>
                             <FileText size={12} /> Report
                           </button>
+                          <button type="button" className="tab-btn tab-btn-purple" style={{ padding: '4px 10px', fontSize: 11, marginLeft: 6 }} onClick={() => handleOpenHistory(r)}>
+                            <History size={12} /> History
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -812,6 +831,53 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
               sku={reportRecord.sku ?? ''}
               downtimeEvents={reportRecord.downtime_snapshot ?? []}
             />
+          </div>
+        </div>
+      )}
+
+      {auditRecord && (
+        <div className="modal-overlay" onClick={() => setAuditRecord(null)}>
+          <div className="modal-card" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Record History — {auditRecord.shift_name} · {auditRecord.record_date}</h2>
+              <button type="button" className="modal-close-btn" onClick={() => setAuditRecord(null)} aria-label="Close">✕</button>
+            </div>
+            <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+              {auditLoading ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 12, fontSize: 12, color: '#64748b', fontWeight: 600 }}>
+                  <Loader2 size={13} className="animate-spin" /> Loading save history…
+                </div>
+              ) : auditEntries.length === 0 ? (
+                <div style={{ fontSize: 12, color: '#64748b', fontWeight: 500, padding: 12 }}>
+                  No save history recorded for this record yet.
+                </div>
+              ) : (
+                <table className="w-full text-[13px]" style={{ minWidth: 520 }}>
+                  <thead>
+                    <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200">
+                      <th className="px-4 py-2.5">When</th>
+                      <th className="px-4 py-2.5">User</th>
+                      <th className="px-4 py-2.5">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditEntries.map((a) => (
+                      <tr key={a.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                        <td className="px-4 py-3 text-slate-600">{aucklandTime(a.created_at)}</td>
+                        <td className="px-4 py-3 text-slate-700">{a.saved_by || '-'}</td>
+                        <td className="px-4 py-3">
+                          {a.action === 'create' ? (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#15803d', backgroundColor: '#dcfce7', border: '1px solid #bbf7d0', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>Created</span>
+                          ) : (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#b45309', backgroundColor: '#fef3c7', border: '1px solid #fde68a', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>Overwritten</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         </div>
       )}

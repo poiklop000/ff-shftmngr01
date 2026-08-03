@@ -44,7 +44,21 @@ export interface SaveMonitoringParams {
   savedBy?: string;
 }
 
+export interface MonitoringRecordAudit {
+  id: string;
+  record_id: string;
+  record_date: string;
+  shift_name: string;
+  action: 'create' | 'overwrite';
+  saved_by: string;
+  created_at: string;
+}
+
 export async function saveMonitoringRecord(params: SaveMonitoringParams): Promise<MonitoringRecord> {
+  // Determine whether this write creates a new record or overwrites an
+  // existing one for the same date + shift so the audit log can tell them apart.
+  const existing = await loadMonitoringRecord(params.date, params.shift);
+
   const payload = {
     record_date: params.date,
     shift_name: params.shift,
@@ -65,7 +79,33 @@ export async function saveMonitoringRecord(params: SaveMonitoringParams): Promis
     .single();
 
   if (error) throw new Error(error.message);
-  return data as MonitoringRecord;
+  const record = data as MonitoringRecord;
+
+  // Best-effort audit trail: never fail the save because the audit insert failed.
+  try {
+    await supabase.from('monitoring_record_audit').insert({
+      record_id: record.id,
+      record_date: params.date,
+      shift_name: params.shift,
+      action: existing ? 'overwrite' : 'create',
+      saved_by: params.savedBy ?? '',
+    });
+  } catch {
+    // ignore audit logging errors
+  }
+
+  return record;
+}
+
+export async function fetchRecordAudit(recordId: string): Promise<MonitoringRecordAudit[]> {
+  const { data, error } = await supabase
+    .from('monitoring_record_audit')
+    .select('*')
+    .eq('record_id', recordId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return (data as MonitoringRecordAudit[]) ?? [];
 }
 
 export async function loadMonitoringRecord(date: string, shift: Shift): Promise<MonitoringRecord | null> {

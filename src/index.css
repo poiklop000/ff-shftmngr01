@@ -395,10 +395,12 @@ html {
 .tab-btn-red { background-color: #b91c1c; color: white; }
 .tab-btn-green { background-color: #15803d; color: white; }
 .tab-btn-amber { background-color: #b45309; color: white; }
+.tab-btn-purple { background-color: #6b21a8; color: white; }
 .tab-btn-blue:hover:not(:disabled) { background-color: #1e40af; }
 .tab-btn-red:hover:not(:disabled) { background-color: #991b1b; }
 .tab-btn-green:hover:not(:disabled) { background-color: #166534; }
 .tab-btn-amber:hover:not(:disabled) { background-color: #92400e; }
+.tab-btn-purple:hover:not(:disabled) { background-color: #581c87; }
 
 /* ---- Layout ---- */
 .sm-container {

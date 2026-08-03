@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
-import { BarChart3, Loader2, FileDown, ExternalLink, RefreshCw, Calendar, Clock } from 'lucide-react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { BarChart3, Loader2, FileDown, ExternalLink, RefreshCw, Calendar, Clock, FileText } from 'lucide-react';
 import { PageHelp } from '@/components/PageHelp';
 import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
 import type { Shift } from '@/types';
@@ -77,6 +77,71 @@ function barColor(i: number): string {
   return BAR_COLORS[i % BAR_COLORS.length];
 }
 
+function renderReportInline(text: string): ReactNode {
+  const parts = text.split(/\*\*(.+?)\*\*/g);
+  return (
+    <>
+      {parts.map((p, i) => (i % 2 === 1 ? <strong key={i}>{p}</strong> : <span key={i}>{p}</span>))}
+    </>
+  );
+}
+
+function ReportSnapshot({ snapshot }: { snapshot: string }) {
+  const lines = snapshot.split('\n');
+  const blocks: ReactNode[] = [];
+  let key = 0;
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed === '') { i++; continue; }
+    if (line.startsWith('|')) {
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i].startsWith('|')) {
+        const cells = lines[i].split('|').slice(1, -1).map((c) => c.trim());
+        rows.push(cells);
+        i++;
+      }
+      const header = rows[0] ?? [];
+      let body = rows.slice(1);
+      if (body.length > 0 && body[0]!.every((c) => /^-{1,}$/.test(c))) body = body.slice(1);
+      blocks.push(
+        <div key={key++} style={{ overflowX: 'auto', margin: '10px 0' }}>
+          <table className="report-table">
+            <thead>
+              <tr>{header.map((c, ci) => <th key={ci}>{renderReportInline(c)}</th>)}</tr>
+            </thead>
+            <tbody>
+              {body.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((c, ci) => <td key={ci}>{renderReportInline(c)}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+    if (line.startsWith('### ')) { blocks.push(<h3 key={key++}>{renderReportInline(line.slice(4))}</h3>); i++; continue; }
+    if (line.startsWith('## ')) { blocks.push(<h2 key={key++}>{renderReportInline(line.slice(3))}</h2>); i++; continue; }
+    if (line.startsWith('# ')) { blocks.push(<h1 key={key++}>{renderReportInline(line.slice(2))}</h1>); i++; continue; }
+    if (trimmed === '---') { blocks.push(<hr key={key++} />); i++; continue; }
+    if (line.startsWith('- ')) {
+      const items: string[] = [];
+      while (i < lines.length && (lines[i].startsWith('- ') || lines[i].startsWith('  '))) {
+        if (lines[i].startsWith('- ')) items.push(lines[i].slice(2));
+        i++;
+      }
+      blocks.push(<ul key={key++}>{items.map((it, iti) => <li key={iti}>{renderReportInline(it)}</li>)}</ul>);
+      continue;
+    }
+    blocks.push(<p key={key++}>{renderReportInline(line)}</p>);
+    i++;
+  }
+  return <>{blocks}</>;
+}
+
 interface AnalyticsViewProps {
   onOpenRecord: (recordDate: string, shift: Shift) => Promise<void>;
 }
@@ -91,6 +156,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [loadedRange, setLoadedRange] = useState<{ start: string; end: string } | null>(null);
+  const [reportRecord, setReportRecord] = useState<MonitoringRecord | null>(null);
 
   const loadData = useCallback(async (start: string, end: string) => {
     if (!start || !end) {
@@ -340,7 +406,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
             title: "Saved records",
             items: [
               "Saved monitoring records for the range are listed at the bottom with their date, shift, SKU, and notes.",
-              "Open loads that record onto the Monitoring board so you can review or re-print it.",
+              "Open loads that record onto the Monitoring board so you can review or re-print it. Report opens the saved report snapshot in a formatted view, exactly as it was printed when saved.",
             ],
           },
         ]}
@@ -777,8 +843,11 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
                         <td className="px-4 py-3 text-slate-600" style={{ maxWidth: 240, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.notes || '-'}</td>
                         <td className="px-4 py-3 text-slate-600">{r.saved_by || '-'}</td>
                         <td className="px-4 py-3">
-                          <button type="button" className="tab-btn tab-btn-green" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => handleOpenRecord(r)}>
+                          <button type="button" className="tab-btn tab-btn-green" style={{ padding: '4px 10px', fontSize: 11, marginRight: 6 }} onClick={() => handleOpenRecord(r)}>
                             <ExternalLink size={12} /> Open
+                          </button>
+                          <button type="button" className="tab-btn tab-btn-blue" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => setReportRecord(r)}>
+                            <FileText size={12} /> Report
                           </button>
                         </td>
                       </tr>
@@ -794,6 +863,25 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
       {msg && (
         <div style={{ textAlign: 'center', marginTop: 10, fontSize: 12, fontWeight: 600, color: '#166534' }}>
           {msg}
+        </div>
+      )}
+
+      {reportRecord && (
+        <div className="modal-overlay" onClick={() => setReportRecord(null)}>
+          <div className="modal-card report-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Saved Report — {reportRecord.shift_name} · {reportRecord.record_date}</h2>
+              <button type="button" className="modal-close-btn" onClick={() => setReportRecord(null)} aria-label="Close">✕</button>
+            </div>
+            {reportRecord.report_snapshot ? (
+              <ReportSnapshot snapshot={reportRecord.report_snapshot} />
+            ) : (
+              <p className="modal-description">
+                No report snapshot was saved with this record (it was saved before the report feature was added).
+                Use Open to load it onto the Monitoring board instead.
+              </p>
+            )}
+          </div>
         </div>
       )}
     </div>

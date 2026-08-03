@@ -32,7 +32,7 @@ import {
 } from '@/types';
 import { fetchCounterLogsByDate } from '@/lib/counterLogs';
 import { fetchDowntimeByDate } from '@/lib/downtime';
-import { saveMonitoringRecord, loadMonitoringRecord, buildActiveJobSnapshot, type ActiveJobSnapshot } from '@/lib/monitoring';
+import { saveMonitoringRecord, loadMonitoringRecord, buildActiveJobSnapshot, buildReportSnapshot, type ActiveJobSnapshot } from '@/lib/monitoring';
 import { fetchOfsStatus } from '@/lib/ofs';
 
 type View = 'calculator' | 'tracker' | 'live' | 'downtime' | 'analytics' | 'admin';
@@ -292,6 +292,17 @@ export default function App() {
       // If counter fetch fails, save with empty snapshot
     }
 
+    const reportSnapshot = buildReportSnapshot({
+      date: data.date,
+      shift,
+      hours: getActiveHours(shift, data.customHours),
+      boardData,
+      notes: data.notes[shift] ?? '',
+      sku: data.sku[shift] ?? '',
+      activeJob,
+      savedBy: profile?.display_name ?? '',
+    });
+
     await saveMonitoringRecord({
       date: data.date,
       shift,
@@ -301,9 +312,11 @@ export default function App() {
       activeJob,
       downtimeSnapshot,
       counterSnapshot,
+      reportSnapshot,
+      savedBy: profile?.display_name ?? '',
     });
     setHasSavedRecord(true);
-  }, [data.date, data.shift, data.db, data.notes, data.sku]);
+  }, [data.date, data.shift, data.db, data.notes, data.sku, data.customHours, profile?.display_name]);
 
   const handleLoadRecord = useCallback(async () => {
     if (!data.date) {

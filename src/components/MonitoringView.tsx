@@ -337,7 +337,7 @@ export function MonitoringView({
           {
             title: "Saving and loading records",
             items: [
-              "Save Record - stores everything on the board (rows, notes, SKU) plus the active job, downtime events, and counter readings for the selected date and shift in the database.",
+              "Save Record - stores everything on the board (rows, notes, SKU) plus the active job, downtime events, and counter readings for the selected date and shift in the database. It also saves a formatted copy of the print report, viewable from the Analytics page.",
               "Load Record - restores a previously saved record for the selected date and shift. It is disabled when no record exists.",
               "Saving again for the same date and shift replaces the previous record.",
             ],

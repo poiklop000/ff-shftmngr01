@@ -18,7 +18,7 @@ import { filterByShiftWindow, getActiveHours, SHIFT_LABELS, type Shift } from '@
 import { DowntimeTimeline } from '@/components/DowntimeTimeline';
 import { PageHelp } from '@/components/PageHelp';
 
-const REFRESH_MS = 5000;
+const REFRESH_MS = 3000;
 const SUMMARY_REFRESH_MS = 30000;
 
 function dateToStr(d: Date): string {

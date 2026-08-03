@@ -457,6 +457,28 @@ html {
   width: auto;
 }
 
+/* Scrollable analytics card bodies: cap each card at ~10 visible lines and
+   scroll the rest inside the card so long tables/lists don't stretch the page. */
+.card-scroll {
+  max-height: 480px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.card-scroll-sm {
+  max-height: 270px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.card-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.card-blue .card-scroll thead th { background: #eff6ff; }
+.card-green .card-scroll thead th { background: #f0fdf4; }
+.card-teal .card-scroll thead th { background: #f0fdfa; }
+
+
 /* ---- Section panel (centered vertical stack of inputs) ---- */
 .section-panel {
   background-color: #f8fafc;

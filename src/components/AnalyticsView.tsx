@@ -552,7 +552,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
                 No jobs captured in this range.
               </div>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
+              <div className="card-scroll">
                 <table className="w-full text-[13px]" style={{ minWidth: 680 }}>
                   <thead>
                     <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200">
@@ -604,7 +604,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
           {jobs.length > 0 && (
             <div className="card card-blue">
               <h3>Job Progress</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="card-scroll-sm" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {jobs.map((j, i) => (
                   <div key={j.jobId}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, marginBottom: 2 }}>
@@ -672,7 +672,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
                 No downtime events in this range.
               </div>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
+              <div className="card-scroll">
                 <table className="w-full text-[13px]" style={{ minWidth: 720 }}>
                   <thead>
                     <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200">
@@ -713,7 +713,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
           {downtimeByCategory.length > 0 && (
             <div className="card card-blue">
               <h3>Downtime by Category</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="card-scroll-sm" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {downtimeByCategory.map(({ category, ms, count }, i) => (
                   <div key={category}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, marginBottom: 2 }}>
@@ -778,7 +778,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
                     </div>
                   ))}
                 </div>
-                <div style={{ overflowX: 'auto' }}>
+                <div className="card-scroll">
                   <table className="w-full text-[13px]" style={{ minWidth: 560 }}>
                     <thead>
                       <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200">
@@ -836,7 +836,7 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
                 No saved monitoring records in this range.
               </div>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
+              <div className="card-scroll">
                 <table className="w-full text-[13px]" style={{ minWidth: 420 }}>
                   <thead>
                     <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200">

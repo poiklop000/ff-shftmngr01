@@ -23,3 +23,4 @@ dist-ssr
 .env
 spans_full.json
 spans_raw.json
+supabase/.temp

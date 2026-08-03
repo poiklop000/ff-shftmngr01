@@ -61,7 +61,7 @@ export function DowntimeHistory({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [expandedRow, setExpandedRow] = useState<number | null>(null);
 
   const activeDate = globalDate || todayStr();
 
@@ -97,34 +97,7 @@ export function DowntimeHistory({
     [events, currentShift, customHours, activeDate],
   );
 
-  // Group repeated events with the same category + reason into one row so the
-  // list shows how many times each issue occurred, with comments combined.
-  const groups = useMemo(() => {
-    const map = new Map<
-      string,
-      { key: string; events: DowntimeEvent[]; category: string | null; reason: string | null; type: string | null; crew: string | null; totalMs: number }
-    >();
-    for (const e of shiftEvents) {
-      const key = `${e.category ?? ''}||${e.reason ?? ''}`;
-      const g = map.get(key) ?? {
-        key,
-        events: [],
-        category: e.category,
-        reason: e.reason,
-        type: e.downtime_type,
-        crew: e.crew_name,
-        totalMs: 0,
-      };
-      g.events.push(e);
-      g.totalMs += e.duration_ms ?? 0;
-      map.set(key, g);
-    }
-    return Array.from(map.values()).sort(
-      (a, b) => b.events[0].start_epoch - a.events[0].start_epoch,
-    );
-  }, [shiftEvents]);
-
-  const totalDowntimeMs = groups.reduce((sum, g) => sum + g.totalMs, 0);
+  const totalDowntimeMs = shiftEvents.reduce((sum, e) => sum + (e.duration_ms ?? 0), 0);
   const resolvedCount = shiftEvents.filter((e) => e.resolved).length;
 
   const dateLabel = activeDate === todayStr() ? "Today's" : activeDate;
@@ -153,9 +126,8 @@ export function DowntimeHistory({
           {
             title: "Reading the event table",
             items: [
-              "Each row is one downtime category + reason, showing start time, category, reason, type (unplanned, planned, or setup), crew, duration, and status (Ongoing or Resolved).",
-              "Repeated events with the same category and reason are combined into one row with an ×N badge showing how many times they occurred, and a combined duration.",
-              "If any of the combined events has operator comments, a speech-bubble icon appears next to it. Click the row to expand and read all the comments.",
+              "Each row is one downtime event, showing start time, category, reason, type (unplanned, planned, or setup), crew, duration, and status (Ongoing or Resolved).",
+              "If an event has operator comments, a speech-bubble icon appears next to it. Click the row to expand and read the comments.",
               "Click the row again to collapse the comments.",
             ],
           },
@@ -254,23 +226,14 @@ export function DowntimeHistory({
                 </tr>
               </thead>
               <tbody>
-                {groups.map((g) => {
-                  const allResolved = g.events.every((e) => e.resolved);
-                  const comments: { eventTime: string; comment: DowntimeComment }[] = [];
-                  for (const e of g.events) {
-                    if (e.comments) {
-                      for (const c of e.comments) {
-                        comments.push({ eventTime: formatEventTime(e.start_epoch), comment: c });
-                      }
-                    }
-                  }
-                  const hasComments = comments.length > 0;
-                  const isExpanded = expandedRow === g.key;
+                {shiftEvents.map((evt) => {
+                  const hasComments = evt.comments && evt.comments.length > 0;
+                  const isExpanded = expandedRow === evt.id;
                   return (
-                    <React.Fragment key={g.key}>
+                    <React.Fragment key={evt.id}>
                       <tr
                         className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${isExpanded ? 'bg-slate-50' : ''}`}
-                        onClick={() => hasComments && setExpandedRow(isExpanded ? null : g.key)}
+                        onClick={() => hasComments && setExpandedRow(isExpanded ? null : evt.id)}
                         style={{ cursor: hasComments ? 'pointer' : 'default' }}
                       >
                         <td className="px-4 py-3 font-medium text-slate-700 whitespace-nowrap">
@@ -279,29 +242,24 @@ export function DowntimeHistory({
                               <MessageSquare size={12} className="text-brand-600 shrink-0" />
                             )}
                             <div>
-                              <div>{formatEventTime(g.events[0].start_epoch)}</div>
-                              <div className="text-[11px] text-slate-400">{formatEventDate(g.events[0].start_epoch)}</div>
+                              <div>{formatEventTime(evt.start_epoch)}</div>
+                              <div className="text-[11px] text-slate-400">{formatEventDate(evt.start_epoch)}</div>
                             </div>
-                            {g.events.length > 1 && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold shrink-0">
-                                ×{g.events.length}
-                              </span>
-                            )}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-slate-600">{g.category ?? '—'}</td>
-                        <td className="px-4 py-3 text-slate-700">{g.reason ?? '—'}</td>
+                        <td className="px-4 py-3 text-slate-600">{evt.category ?? '—'}</td>
+                        <td className="px-4 py-3 text-slate-700">{evt.reason ?? '—'}</td>
                         <td className="px-4 py-3">
-                          <DowntimeTypeBadge type={g.type} />
+                          <DowntimeTypeBadge type={evt.downtime_type} />
                         </td>
                         <td className="px-4 py-3 text-slate-600 whitespace-nowrap hidden sm:table-cell">
-                          {g.crew ?? <span className="text-slate-300">—</span>}
+                          {evt.crew_name ?? <span className="text-slate-300">—</span>}
                         </td>
                         <td className="px-4 py-3 text-right font-bold text-slate-700 whitespace-nowrap">
-                          {formatDuration(g.totalMs)}
+                          {formatDuration(evt.duration_ms ?? 0)}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {allResolved ? (
+                          {evt.resolved ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-[11px] font-bold">
                               Resolved
                             </span>
@@ -316,7 +274,7 @@ export function DowntimeHistory({
                       {isExpanded && hasComments && (
                         <tr className="border-b border-slate-100 bg-slate-50/50">
                           <td colSpan={7} className="px-4 py-3">
-                            <CommentList comments={comments} />
+                            <CommentList comments={evt.comments!} />
                           </td>
                         </tr>
                       )}
@@ -364,19 +322,16 @@ function SummaryCard({
   );
 }
 
-function CommentList({ comments }: { comments: { eventTime: string; comment: DowntimeComment }[] }) {
+function CommentList({ comments }: { comments: DowntimeComment[] }) {
   return (
     <div className="space-y-2">
       <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">
-        Operator Comments ({comments.length})
+        Operator Comments
       </div>
-      {comments.map(({ eventTime, comment: c }, i) => (
+      {comments.map((c, i) => (
         <div key={i} className="flex items-start gap-2 text-[12px] text-slate-700">
           <MessageSquare size={12} className="text-brand-500 mt-0.5 shrink-0" />
           <div>
-            <span className="inline-block px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[10px] font-bold mr-1.5">
-              {eventTime}
-            </span>
             <span className="font-semibold">{c.userName}</span>
             {c.crewName && <span className="text-slate-400"> · {c.crewName}</span>}
             <span className="text-slate-400 ml-1.5">

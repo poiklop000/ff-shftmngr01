@@ -384,7 +384,7 @@ export function computeDowntimeLogs(
   const lastHourStr = hours[hours.length - 1]!.split(' - ')[1]!.trim();
   const shiftEndMin = shiftTimeToMinutes(lastHourStr, shiftStartMin);
 
-  const buckets: Record<number, Array<{ label: string; startMin: number }>> = {};
+  const buckets: Record<number, Array<{ label: string; startMin: number; comments: string[] }>> = {};
 
   for (const evt of events) {
     if (!evt.startText) continue;
@@ -403,13 +403,10 @@ export function computeDowntimeLogs(
 
     const category = evt.category?.trim();
     const reason = evt.reason?.trim() || 'Downtime';
-    const baseLabel = category ? `${category} - ${reason}` : reason;
+    const label = category ? `${category} - ${reason}` : reason;
     const operatorComments = evt.comments
       ?.filter((c) => !c.systemPost && c.text?.trim())
       .map((c) => c.text.trim()) ?? [];
-    const label = operatorComments.length > 0
-      ? `${baseLabel}\n    *(${operatorComments.join('; ')})`
-      : baseLabel;
 
     hours.forEach((interval, i) => {
       const [iStart, iEnd] = interval.split(' - ').map((s) => s.trim());
@@ -419,19 +416,31 @@ export function computeDowntimeLogs(
       // overlap check
       if (startMin < iEndMin && endMin > iStartMin) {
         if (!buckets[i]) buckets[i] = [];
-        buckets[i].push({ label, startMin });
+        buckets[i].push({ label, startMin, comments: operatorComments });
       }
     });
   }
 
   for (const [i, entries] of Object.entries(buckets)) {
     entries.sort((a, b) => a.startMin - b.startMin);
-    const counts: Record<string, number> = {};
-    for (const { label } of entries) {
-      counts[label] = (counts[label] ?? 0) + 1;
+    // Combine events with the same category + reason into one line with an
+    // occurrence count, and merge all operator comments from those occurrences
+    // on the line below.
+    const groups = new Map<string, { label: string; count: number; comments: string[]; startMin: number }>();
+    for (const { label, startMin, comments } of entries) {
+      const g = groups.get(label) ?? { label, count: 0, comments: [], startMin };
+      g.count += 1;
+      if (comments) g.comments.push(...comments);
+      groups.set(label, g);
     }
-    result[Number(i)] = Object.entries(counts)
-      .map(([label, n]) => (n > 1 ? `${label} (${n}x)` : label))
+    result[Number(i)] = Array.from(groups.values())
+      .sort((a, b) => a.startMin - b.startMin)
+      .map((g) => {
+        const countLabel = g.count > 1 ? `${g.label} (${g.count}x)` : g.label;
+        return g.comments.length > 0
+          ? `${countLabel}\n    *(${g.comments.join('; ')})`
+          : countLabel;
+      })
       .join('\n');
   }
 

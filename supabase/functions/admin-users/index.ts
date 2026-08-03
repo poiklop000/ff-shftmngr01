@@ -83,7 +83,10 @@ Deno.serve(async (req: Request) => {
   try {
     const { userId } = await requireAdmin(req, admin);
 
-    if (req.method === "GET") {
+    const body = await req.json().catch(() => ({}));
+    const action = String(body.action ?? "");
+
+    if (req.method === "GET" || action === "list") {
       const { data: users, error } = await admin
         .from("profiles")
         .select("user_id, username, display_name, role, is_active, created_at")
@@ -91,9 +94,6 @@ Deno.serve(async (req: Request) => {
       if (error) return json({ error: error.message }, 400);
       return json({ users });
     }
-
-    const body = await req.json().catch(() => ({}));
-    const action = String(body.action ?? "");
 
     if (action === "create") {
       const { username, password, displayName } = validateCredentials(body.username ?? "", body.password ?? "", body.displayName ?? "");

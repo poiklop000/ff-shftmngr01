@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, Loader2, FileDown, ExternalLink, RefreshCw, Calendar, Clock, FileText, History } from 'lucide-react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { BarChart3, Loader2, FileDown, ExternalLink, RefreshCw, Calendar, Clock, FileText, History, MessageSquare } from 'lucide-react';
 import { PageHelp } from '@/components/PageHelp';
 import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
 import { ShiftReport } from '@/components/ShiftReport';
 import { getActiveHours, type Shift } from '@/types';
-import { fetchDowntimeBetween, formatDuration, localDateTimeToEpoch, type DowntimeEvent } from '@/lib/downtime';
+import { fetchDowntimeBetween, formatDuration, localDateTimeToEpoch, type DowntimeComment, type DowntimeEvent } from '@/lib/downtime';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
 import {
   fetchJobsInRange,
@@ -141,6 +141,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps
   const [auditRecord, setAuditRecord] = useState<MonitoringRecord | null>(null);
   const [auditEntries, setAuditEntries] = useState<MonitoringRecordAudit[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
+  const [expandedDowntimeId, setExpandedDowntimeId] = useState<number | null>(null);
 
   // Keep the Analytics filters and last loaded range in localStorage so the
   // page remembers them when the user navigates away and comes back.
@@ -696,23 +697,48 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps
                     </tr>
                   </thead>
                   <tbody>
-                    {downtime.map((e) => (
-                      <tr key={e.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors" title={e.reason ?? ''}>
-                        <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{eventStartLabel(e)}</td>
-                        <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{eventDuration(e)}</td>
-                        <td className="px-4 py-3">
-                          <DowntimeTypeBadge type={e.downtime_type} />
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">{e.category ?? '-'}</td>
-                        <td className="px-4 py-3 text-slate-700" style={{ maxWidth: 260 }}>{e.reason ?? '-'}</td>
-                        <td className="px-4 py-3 text-slate-600">{e.crew_name ?? '-'}</td>
-                        <td className="px-4 py-3">
-                          <span style={{ fontSize: 11, fontWeight: 700, color: e.resolved ? '#166534' : '#b91c1c' }}>
-                            {e.resolved ? 'Resolved' : 'Ongoing'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                    {downtime.map((e) => {
+                      const hasComments = e.comments && e.comments.length > 0;
+                      const isExpanded = expandedDowntimeId === e.id;
+                      return (
+                        <Fragment key={e.id}>
+                          <tr
+                            className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${isExpanded ? 'bg-slate-50' : ''}`}
+                            onClick={() => hasComments && setExpandedDowntimeId(isExpanded ? null : e.id)}
+                            style={{ cursor: hasComments ? 'pointer' : 'default' }}
+                            title={e.reason ?? ''}
+                          >
+                            <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
+                              <div className="flex items-center gap-1.5">
+                                {hasComments && (
+                                  <MessageSquare size={13} className="text-brand-600 shrink-0" />
+                                )}
+                                {eventStartLabel(e)}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{eventDuration(e)}</td>
+                            <td className="px-4 py-3">
+                              <DowntimeTypeBadge type={e.downtime_type} />
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">{e.category ?? '-'}</td>
+                            <td className="px-4 py-3 text-slate-700" style={{ maxWidth: 260 }}>{e.reason ?? '-'}</td>
+                            <td className="px-4 py-3 text-slate-600">{e.crew_name ?? '-'}</td>
+                            <td className="px-4 py-3">
+                              <span style={{ fontSize: 11, fontWeight: 700, color: e.resolved ? '#166534' : '#b91c1c' }}>
+                                {e.resolved ? 'Resolved' : 'Ongoing'}
+                              </span>
+                            </td>
+                          </tr>
+                          {isExpanded && hasComments && (
+                            <tr className="border-b border-slate-100 bg-slate-50/50">
+                              <td colSpan={7} className="px-4 py-3">
+                                <CommentList comments={e.comments!} />
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -955,6 +981,34 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function CommentList({ comments }: { comments: DowntimeComment[] }) {
+  return (
+    <div className="space-y-2">
+      <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">
+        Operator Comments
+      </div>
+      {comments.map((c, i) => (
+        <div key={i} className="flex items-start gap-2 text-[12px] text-slate-700">
+          <MessageSquare size={12} className="text-brand-500 mt-0.5 shrink-0" />
+          <div>
+            <span className="font-semibold">{c.userName}</span>
+            {c.crewName && <span className="text-slate-400"> · {c.crewName}</span>}
+            <span className="text-slate-400 ml-1.5">
+              {new Date(c.commentTimestamp).toLocaleString('en-AU', {
+                day: '2-digit',
+                month: 'short',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </span>
+            <p className="m-0 mt-0.5 text-slate-600">{c.text}</p>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

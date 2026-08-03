@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BarChart3, Loader2, FileDown, ExternalLink, RefreshCw, Calendar, Clock, FileText, History } from 'lucide-react';
 import { PageHelp } from '@/components/PageHelp';
 import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
@@ -47,6 +47,49 @@ function dateOffset(days: number): string {
   return toDateStr(d);
 }
 
+const ANALYTICS_PERSIST_KEY = 'ff_analytics_persist_v1';
+
+interface AnalyticsPersistState {
+  startAt: string;
+  endAt: string;
+  textFilter: string;
+  typeFilter: string;
+  loadedRange: { start: string; end: string } | null;
+}
+
+function defaultAnalyticsPersist(): AnalyticsPersistState {
+  return {
+    startAt: `${dateOffset(-6)}T00:00`,
+    endAt: `${dateOffset(0)}T23:59`,
+    textFilter: '',
+    typeFilter: 'All',
+    loadedRange: null,
+  };
+}
+
+function loadAnalyticsPersist(): AnalyticsPersistState {
+  try {
+    const raw = localStorage.getItem(ANALYTICS_PERSIST_KEY);
+    if (!raw) return defaultAnalyticsPersist();
+    const parsed = JSON.parse(raw) as Partial<AnalyticsPersistState>;
+    const fallback = defaultAnalyticsPersist();
+    return {
+      startAt: typeof parsed.startAt === 'string' ? parsed.startAt : fallback.startAt,
+      endAt: typeof parsed.endAt === 'string' ? parsed.endAt : fallback.endAt,
+      textFilter: typeof parsed.textFilter === 'string' ? parsed.textFilter : '',
+      typeFilter: typeof parsed.typeFilter === 'string' ? parsed.typeFilter : 'All',
+      loadedRange:
+        parsed.loadedRange &&
+        typeof parsed.loadedRange.start === 'string' &&
+        typeof parsed.loadedRange.end === 'string'
+          ? parsed.loadedRange
+          : null,
+    };
+  } catch {
+    return defaultAnalyticsPersist();
+  }
+}
+
 // Convert a UTC ISO timestamp to a factory (Auckland) date-time label.
 function aucklandTime(iso: string): string {
   const dt = new Date(iso);
@@ -83,19 +126,30 @@ interface AnalyticsViewProps {
 }
 
 export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
-  const [startAt, setStartAt] = useState(() => `${dateOffset(-6)}T00:00`);
-  const [endAt, setEndAt] = useState(() => `${dateOffset(0)}T23:59`);
-  const [textFilter, setTextFilter] = useState('');
-  const [typeFilter, setTypeFilter] = useState('All');
+  const [persisted] = useState(() => loadAnalyticsPersist());
+  const [startAt, setStartAt] = useState(persisted.startAt);
+  const [endAt, setEndAt] = useState(persisted.endAt);
+  const [textFilter, setTextFilter] = useState(persisted.textFilter);
+  const [typeFilter, setTypeFilter] = useState(persisted.typeFilter);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [loadedRange, setLoadedRange] = useState<{ start: string; end: string } | null>(null);
+  const [loadedRange, setLoadedRange] = useState<{ start: string; end: string } | null>(persisted.loadedRange);
   const [reportRecord, setReportRecord] = useState<MonitoringRecord | null>(null);
   const [auditRecord, setAuditRecord] = useState<MonitoringRecord | null>(null);
   const [auditEntries, setAuditEntries] = useState<MonitoringRecordAudit[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
+
+  // Keep the Analytics filters and last loaded range in localStorage so the
+  // page remembers them when the user navigates away and comes back.
+  useEffect(() => {
+    try {
+      localStorage.setItem(ANALYTICS_PERSIST_KEY, JSON.stringify({ startAt, endAt, textFilter, typeFilter, loadedRange }));
+    } catch {
+      // ignore storage failures
+    }
+  }, [startAt, endAt, textFilter, typeFilter, loadedRange]);
 
   const loadData = useCallback(async (start: string, end: string) => {
     if (!start || !end) {
@@ -134,6 +188,16 @@ export function AnalyticsView({ onOpenRecord }: AnalyticsViewProps) {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  // Restore the previously loaded range (if any) automatically on mount so
+  // returning to Analytics shows the same data without re-selecting a range.
+  useEffect(() => {
+    const p = loadAnalyticsPersist();
+    if (p.loadedRange?.start && p.loadedRange?.end) {
+      loadData(p.loadedRange.start, p.loadedRange.end);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleQuick = (days: number) => {

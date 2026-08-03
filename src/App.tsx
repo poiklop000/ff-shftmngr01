@@ -700,6 +700,7 @@ function epochToConsoleTime(
             currentShift={data.shift}
             customHours={data.customHours}
             date={data.date}
+            isAdmin={profile?.role === 'admin'}
           />
         ) : effectiveView === 'downtime' ? (
           <DowntimeHistory

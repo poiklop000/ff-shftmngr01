@@ -491,6 +491,11 @@ html {
 .card-blue .card-scroll thead th { background: #eff6ff; }
 .card-green .card-scroll thead th { background: #f0fdf4; }
 .card-teal .card-scroll thead th { background: #f0fdfa; }
+/* Table column headers take a lighter tone of each card's title color so they
+   stand out but stay tied to the card theme. */
+.card-blue thead th { color: #2563eb; }
+.card-green thead th { color: #16a34a; }
+.card-teal thead th { color: #0d9488; }
 
 
 /* ---- Section panel (centered vertical stack of inputs) ---- */

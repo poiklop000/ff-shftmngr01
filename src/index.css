@@ -1375,6 +1375,10 @@ html[data-theme='dark'] .shift-report .text-slate-500 { color: #64748b !importan
 html[data-theme='dark'] .shift-report .text-slate-600 { color: #475569 !important; }
 html[data-theme='dark'] .shift-report .text-slate-700 { color: #334155 !important; }
 
+/* Report table rows stay light (no dark-theme zebra striping) */
+html[data-theme='dark'] .shift-report tbody tr:nth-child(odd) { background-color: #f8fafc !important; }
+html[data-theme='dark'] .shift-report tbody tr:hover { background-color: #eff6ff !important; }
+
 /* Toggles and OEE inside the report */
 html[data-theme='dark'] .shift-report .toggle-btn.neutral {
   background-color: #f1f5f9 !important;

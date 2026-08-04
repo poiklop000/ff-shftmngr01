@@ -23,10 +23,10 @@ const ROLE_OPTIONS: { value: Role; label: string }[] = [
 ];
 
 const ROLE_COLORS: Record<Role, { bg: string; color: string }> = {
-  admin: { bg: '#eff6ff', color: '#1e40af' },
+  admin: { bg: 'var(--blue-tag-bg)', color: 'var(--blue-tag-text)' },
   manager: { bg: '#fdf4ff', color: '#86198f' },
-  team_lead: { bg: '#fffbeb', color: '#b45309' },
-  operator: { bg: '#f0fdf4', color: '#166534' },
+  team_lead: { bg: 'var(--amber-tag-bg)', color: 'var(--amber-tag-text)' },
+  operator: { bg: 'var(--green-tag-bg)', color: 'var(--green-tag-text)' },
 };
 
 export function AdminView({ currentUserId }: AdminViewProps) {
@@ -182,24 +182,24 @@ export function AdminView({ currentUserId }: AdminViewProps) {
 
   return (
     <div>
-      <div className="card" style={{ background: '#eff6ff', borderColor: '#bfdbfe' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, fontSize: 15, color: '#1e3a8a' }}>
+      <div className="card" style={{ background: 'var(--blue-tag-bg)', borderColor: 'var(--blue-tag-border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, fontSize: 15, color: 'var(--blue-tag-text)' }}>
           <Shield size={18} />
           User Management
         </div>
-        <div style={{ fontSize: 12, color: '#1e40af', marginTop: 6, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 12, color: 'var(--blue-tag-text)', marginTop: 6, lineHeight: 1.5 }}>
           Create accounts, reset passwords, change roles, and enable or disable access.
           Every user signs in with their name and password.
         </div>
       </div>
 
       {error && (
-        <div style={{ fontSize: 13, color: '#b91c1c', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 10px', fontWeight: 600, marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: 8, padding: '8px 10px', fontWeight: 600, marginBottom: 12 }}>
           {error}
         </div>
       )}
       {msg && (
-        <div style={{ fontSize: 13, color: '#166534', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '8px 10px', fontWeight: 600, marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: 'var(--success-text)', background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: 8, padding: '8px 10px', fontWeight: 600, marginBottom: 12 }}>
           {msg}
         </div>
       )}
@@ -209,15 +209,15 @@ export function AdminView({ currentUserId }: AdminViewProps) {
           <UserPlus size={16} />
           {showAdd ? 'Cancel' : 'Add User'}
         </button>
-        <button type="button" className="tab-btn" style={{ background: '#e2e8f0', color: '#0f172a' }} onClick={loadUsers} disabled={busy || loading}>
+        <button type="button" className="tab-btn" style={{ background: 'var(--btn-sec-bg)', color: 'var(--btn-sec-text)' }} onClick={loadUsers} disabled={busy || loading}>
           <RefreshCw size={16} />
           Refresh
         </button>
       </div>
 
       {showAdd && (
-        <div className="card" style={{ background: '#ffffff' }}>
-          <h3 style={{ color: '#0f172a' }}>Add User</h3>
+        <div className="card" style={{ background: 'var(--card-bg)' }}>
+          <h3 style={{ color: 'var(--app-fg)' }}>Add User</h3>
           <form onSubmit={handleAdd} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
               <div className="input-group" style={{ maxWidth: 'none' }}>
@@ -251,9 +251,9 @@ export function AdminView({ currentUserId }: AdminViewProps) {
       )}
 
       {loading ? (
-        <div className="card" style={{ textAlign: 'center', color: '#64748b', fontSize: 13 }}>Loading users...</div>
+        <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading users...</div>
       ) : users.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', color: '#64748b', fontSize: 13 }}>No users yet. Add the first user above.</div>
+        <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No users yet. Add the first user above.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {users.map((u) => (
@@ -261,7 +261,7 @@ export function AdminView({ currentUserId }: AdminViewProps) {
               key={u.user_id}
               className="card"
               style={{
-                background: '#ffffff',
+                background: 'var(--card-bg)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 10,
@@ -271,17 +271,17 @@ export function AdminView({ currentUserId }: AdminViewProps) {
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontWeight: 800, fontSize: 15, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--app-fg)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     {u.display_name}
                     {u.user_id === currentUserId && (
-                      <span style={{ fontSize: 10, fontWeight: 800, background: '#fef3c7', color: '#92400e', borderRadius: 999, padding: '2px 8px', letterSpacing: '0.3px' }}>
+                      <span style={{ fontSize: 10, fontWeight: 800, background: 'var(--amber-tag-bg)', color: 'var(--amber-tag-text)', borderRadius: 999, padding: '2px 8px', letterSpacing: '0.3px' }}>
                         YOU
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
                     Login: <strong>{u.username}</strong>
-                    {!u.is_active && <span style={{ color: '#b91c1c', fontWeight: 700 }}> — disabled</span>}
+                    {!u.is_active && <span style={{ color: 'var(--danger-text)', fontWeight: 700 }}> — disabled</span>}
                   </div>
                 </div>
                 {badge(u)}
@@ -307,7 +307,7 @@ export function AdminView({ currentUserId }: AdminViewProps) {
                     <button type="button" className="tab-btn tab-btn-green" style={{ padding: '8px 14px' }} onClick={() => handleSaveEdit(u.user_id)} disabled={busy}>
                       <Check size={15} /> Save
                     </button>
-                    <button type="button" className="tab-btn" style={{ background: '#e2e8f0', color: '#0f172a', padding: '8px 14px' }} onClick={() => setEditingId(null)} disabled={busy}>
+                    <button type="button" className="tab-btn" style={{ background: 'var(--btn-sec-bg)', color: 'var(--btn-sec-text)', padding: '8px 14px' }} onClick={() => setEditingId(null)} disabled={busy}>
                       Cancel
                     </button>
                   </div>
@@ -328,7 +328,7 @@ export function AdminView({ currentUserId }: AdminViewProps) {
                     Edit
                   </button>
                   {u.user_id === currentUserId ? (
-                    <button type="button" className="tab-btn" style={{ background: '#e2e8f0', color: '#0f172a', padding: '7px 12px', fontSize: 12 }} disabled>
+                    <button type="button" className="tab-btn" style={{ background: 'var(--btn-sec-bg)', color: 'var(--btn-sec-text)', padding: '7px 12px', fontSize: 12 }} disabled>
                       <Ban size={14} /> Disable
                     </button>
                   ) : (
@@ -350,17 +350,17 @@ export function AdminView({ currentUserId }: AdminViewProps) {
                       <button type="button" className="tab-btn tab-btn-green" style={{ padding: '7px 12px', fontSize: 12 }} onClick={() => handleReset(u.user_id)} disabled={busy}>
                         <Check size={14} /> Save
                       </button>
-                      <button type="button" className="tab-btn" style={{ background: '#e2e8f0', color: '#0f172a', padding: '7px 12px', fontSize: 12 }} onClick={() => { setResetId(null); setResetPassword(''); }} disabled={busy}>
+                      <button type="button" className="tab-btn" style={{ background: 'var(--btn-sec-bg)', color: 'var(--btn-sec-text)', padding: '7px 12px', fontSize: 12 }} onClick={() => { setResetId(null); setResetPassword(''); }} disabled={busy}>
                         Cancel
                       </button>
                     </span>
                   ) : (
-                    <button type="button" className="tab-btn" style={{ background: '#e2e8f0', color: '#0f172a', padding: '7px 12px', fontSize: 12 }} onClick={() => { setResetId(u.user_id); setResetPassword(''); }} disabled={busy}>
+                    <button type="button" className="tab-btn" style={{ background: 'var(--btn-sec-bg)', color: 'var(--btn-sec-text)', padding: '7px 12px', fontSize: 12 }} onClick={() => { setResetId(u.user_id); setResetPassword(''); }} disabled={busy}>
                       <KeyRound size={14} /> Reset Password
                     </button>
                   )}
                   {u.user_id === currentUserId ? (
-                    <button type="button" className="tab-btn" style={{ background: '#e2e8f0', color: '#0f172a', padding: '7px 12px', fontSize: 12 }} disabled>
+                    <button type="button" className="tab-btn" style={{ background: 'var(--btn-sec-bg)', color: 'var(--btn-sec-text)', padding: '7px 12px', fontSize: 12 }} disabled>
                       <Trash2 size={14} /> Delete
                     </button>
                   ) : (

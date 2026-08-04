@@ -368,16 +368,16 @@ export function MonitoringView({
         </h3>
 
         <div className="card-row sku-card" style={{ marginTop: 12, flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
-          <label style={{ fontSize: 11, fontWeight: 700, color: '#1e3a8a', textTransform: 'uppercase', letterSpacing: '0.3px', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.3px', display: 'flex', alignItems: 'center', gap: 4 }}>
             <Package size={13} />
             SKUs:
           </label>
           {jobsLoading ? (
-            <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               <Loader2 size={12} className="animate-spin" /> Loading active jobs from database…
             </span>
           ) : jobsError ? (
-            <span style={{ fontSize: 12, color: '#b91c1c', fontWeight: 600 }}>{jobsError}</span>
+            <span style={{ fontSize: 12, color: 'var(--danger-text)', fontWeight: 600 }}>{jobsError}</span>
           ) : activeJobs.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {activeJobs.map((job, i) => {
@@ -385,10 +385,10 @@ export function MonitoringView({
                 const product = rest.join(' ');
                 return (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: '#1d4ed8', backgroundColor: '#dbeafe', border: '1px solid #bfdbfe', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--blue-tag-text)', backgroundColor: 'var(--blue-tag-bg)', border: '1px solid var(--blue-tag-border)', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>
                       {jobName}
                     </span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: '#1e3a8a', lineHeight: 1.4 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--app-fg)', lineHeight: 1.4 }}>
                       {product}
                     </span>
                   </div>
@@ -396,7 +396,7 @@ export function MonitoringView({
               })}
             </div>
           ) : (
-            <span style={{ fontSize: 12, color: '#64748b', fontWeight: 500 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>
               No active jobs captured for this shift yet.
             </span>
           )}
@@ -421,13 +421,13 @@ export function MonitoringView({
         <div className="card card-green">
           <div className="card-row">
             <span>Shift Total Output:</span>
-            <span style={{ fontWeight: 'bold', fontSize: 14, color: '#166534' }}>{totalOutput}</span>
+            <span style={{ fontWeight: 'bold', fontSize: 14, color: 'var(--success-text)' }}>{totalOutput}</span>
           </div>
         </div>
         <div className="card card-teal">
           <div className="card-row">
             <span>Shift Average OEE:</span>
-            <span style={{ fontWeight: 'bold', fontSize: 14, color: '#115e59' }}>{avgOee}%</span>
+            <span style={{ fontWeight: 'bold', fontSize: 14, color: 'var(--teal-tag-text)' }}>{avgOee}%</span>
           </div>
         </div>
       </div>
@@ -455,7 +455,7 @@ export function MonitoringView({
           ref={notesRef}
           className="table-text-area no-print"
           rows={1}
-          style={{ width: '100%', maxWidth: '100%', minHeight: 80, fontSize: 13, fontWeight: 500, color: '#0f172a', textAlign: 'left' }}
+          style={{ width: '100%', maxWidth: '100%', minHeight: 80, fontSize: 13, fontWeight: 500, color: 'var(--input-text)', backgroundColor: 'var(--input-bg)', textAlign: 'left' }}
           placeholder="Enter production run details, observations, or handover notes... (Enter for new line)"
           value={notes[currentShift]}
           onChange={(e) => onMetaChange(currentShift, 'notes', e.target.value)}
@@ -513,13 +513,13 @@ export function MonitoringView({
           Load Record
         </button>
         {hasSavedRecord && !saving && !loadingRecord && (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: '#166534' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: 'var(--success-text)' }}>
             <CheckCircle2 size={12} /> Saved record exists
           </span>
         )}
       </div>
       {importMsg && (
-        <div style={{ textAlign: 'center', marginTop: 8, fontSize: 12, fontWeight: 600, color: importMsg.includes('failed') ? '#b91c1c' : '#166534' }}>
+        <div style={{ textAlign: 'center', marginTop: 8, fontSize: 12, fontWeight: 600, color: importMsg.includes('failed') ? 'var(--danger-text)' : 'var(--success-text)' }}>
           {importMsg}
         </div>
       )}

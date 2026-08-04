@@ -576,8 +576,8 @@ function epochToConsoleTime(
   // then the login screen until a valid session exists.
   if (!authReady) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc', color: '#1e293b' }}>
-        <div style={{ fontWeight: 700, color: '#64748b' }}>Loading...</div>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--app-bg, #f8fafc)', color: 'var(--app-fg, #1e293b)' }}>
+        <div style={{ fontWeight: 700, color: 'var(--text-muted, #64748b)' }}>Loading...</div>
       </div>
     );
   }

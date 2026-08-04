@@ -492,7 +492,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
         </div>
 
         {loadedRange && (
-          <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: '#1e40af' }}>
+          <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: 'var(--blue-tag-text)' }}>
             Showing {loadedRange.start.replace('T', ' ')} to {loadedRange.end.replace('T', ' ')}
           </div>
         )}
@@ -505,7 +505,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
       )}
 
       {isLoading && (
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, padding: 24, fontSize: 13, fontWeight: 600, color: '#475569' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, padding: 24, fontSize: 13, fontWeight: 600, color: 'var(--text-faint)' }}>
           <Loader2 size={16} className="animate-spin" /> Loading analytics data…
         </div>
       )}
@@ -563,7 +563,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
               </button>
             </h3>
             {jobs.length === 0 ? (
-              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 500, padding: 8 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500, padding: 8 }}>
                 No jobs captured in this range.
               </div>
             ) : (
@@ -585,7 +585,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
                     {jobs.map((j) => (
                       <tr key={j.jobId} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
                         <td className="px-4 py-3 text-slate-700">
-                          <span style={{ fontSize: 10, fontWeight: 700, color: '#1d4ed8', backgroundColor: '#dbeafe', border: '1px solid #bfdbfe', borderRadius: 999, padding: '2px 8px', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--blue-tag-text)', backgroundColor: 'var(--blue-tag-bg)', border: '1px solid var(--blue-tag-border)', borderRadius: 999, padding: '2px 8px', whiteSpace: 'nowrap' }}>
                             Job {j.jobId}
                           </span>
                           <div style={{ fontSize: 12, marginTop: 4 }}>{j.product}</div>
@@ -595,7 +595,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
                         <td className="px-4 py-3 text-slate-600">{j.produced.toLocaleString()}</td>
                         <td className="px-4 py-3 text-slate-700">
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <div style={{ width: 80, height: 8, backgroundColor: '#e2e8f0', borderRadius: 999, overflow: 'hidden' }}>
+                            <div style={{ width: 80, height: 8, backgroundColor: 'var(--track-bg)', borderRadius: 999, overflow: 'hidden' }}>
                               <div style={{ width: `${Math.min(100, Math.max(0, j.progressPct))}%`, height: '100%', backgroundColor: j.progressPct >= 100 ? '#16a34a' : '#1d4ed8' }} />
                             </div>
                             <span>{j.progressPct.toFixed(0)}%</span>
@@ -603,7 +603,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
                         </td>
                         <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
                           <div style={{ fontSize: 12 }}>{aucklandTime(j.firstCapture)}</div>
-                          <div style={{ fontSize: 12, color: '#64748b' }}>{aucklandTime(j.lastCapture)}</div>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{aucklandTime(j.lastCapture)}</div>
                         </td>
                         <td className="px-4 py-3 text-slate-600">{j.shifts.length > 0 ? j.shifts.join(', ') : '-'}</td>
                         <td className="px-4 py-3 text-slate-600">{j.runs}</td>
@@ -626,7 +626,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
                       <span>Job {j.jobId} — {j.product}</span>
                       <span>{j.progressPct.toFixed(0)}%</span>
                     </div>
-                    <div style={{ width: '100%', height: 12, backgroundColor: '#e2e8f0', borderRadius: 6, overflow: 'hidden' }}>
+                    <div style={{ width: '100%', height: 12, backgroundColor: 'var(--track-bg)', borderRadius: 6, overflow: 'hidden' }}>
                       <div
                         style={{
                           width: `${Math.min(100, Math.max(0, j.progressPct))}%`,
@@ -653,12 +653,12 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
                   placeholder="Search reason…"
                   value={textFilter}
                   onChange={(e) => setTextFilter(e.target.value)}
-                  style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid #cbd5e1', maxWidth: 160 }}
+                  style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--input-border)', backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', maxWidth: 160 }}
                 />
                 <select
                   value={typeFilter}
                   onChange={(e) => setTypeFilter(e.target.value)}
-                  style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid #cbd5e1', color: '#0f172a', backgroundColor: '#fff' }}
+                  style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--input-border)', color: 'var(--input-text)', backgroundColor: 'var(--input-bg)' }}
                 >
                   <option value="All">All Types</option>
                   {downtimeTypes.map((t) => (
@@ -683,7 +683,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
               </div>
             </h3>
             {downtime.length === 0 ? (
-              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 500, padding: 8 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500, padding: 8 }}>
                 No downtime events in this range.
               </div>
             ) : (
@@ -728,7 +728,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
                             <td className="px-4 py-3 text-slate-700" style={{ maxWidth: 260 }}>{e.reason ?? '-'}</td>
                             <td className="px-4 py-3 text-slate-600">{e.crew_name ?? '-'}</td>
                             <td className="px-4 py-3">
-                              <span style={{ fontSize: 11, fontWeight: 700, color: e.resolved ? '#166534' : '#b91c1c' }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: e.resolved ? 'var(--success-text)' : 'var(--danger-text)' }}>
                                 {e.resolved ? 'Resolved' : 'Ongoing'}
                               </span>
                             </td>
@@ -760,7 +760,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>{category}</span>
                       <span>{formatDuration(ms)} · {count} {count === 1 ? 'event' : 'events'}</span>
                     </div>
-                    <div style={{ width: '100%', height: 12, backgroundColor: '#e2e8f0', borderRadius: 6, overflow: 'hidden' }}>
+                    <div style={{ width: '100%', height: 12, backgroundColor: 'var(--track-bg)', borderRadius: 6, overflow: 'hidden' }}>
                       <div
                         style={{
                           width: `${maxCategoryMs > 0 ? (ms / maxCategoryMs) * 100 : 0}%`,
@@ -798,7 +798,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
               </button>
             </h3>
             {data.hourly.length === 0 ? (
-              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 500, padding: 8 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500, padding: 8 }}>
                 No hourly data available for this range.
               </div>
             ) : (
@@ -811,7 +811,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
                         style={{
                           width: 22,
                           height: `${maxHourOut > 0 ? Math.max(2, (h.out / maxHourOut) * 100) : 2}%`,
-                          backgroundColor: h.out > 0 ? '#16a34a' : '#e2e8f0',
+                          backgroundColor: h.out > 0 ? '#16a34a' : 'var(--track-bg)',
                           borderRadius: '4px 4px 0 0',
                         }}
                       />
@@ -840,7 +840,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
                             <td className="px-4 py-3 text-slate-600">{h.in.toLocaleString()}</td>
                             <td className="px-4 py-3 text-slate-700">{h.out.toLocaleString()}</td>
                             <td className="px-4 py-3 text-slate-600">{h.rated.toLocaleString()}</td>
-                            <td className="px-4 py-3" style={{ color: h.rated > 0 && (h.out / h.rated) >= 0.7 ? '#166534' : '#b91c1c', fontWeight: 700 }}>{eff}%</td>
+                            <td className="px-4 py-3" style={{ color: h.rated > 0 && (h.out / h.rated) >= 0.7 ? 'var(--success-text)' : 'var(--danger-text)', fontWeight: 700 }}>{eff}%</td>
                           </tr>
                         );
                       })}
@@ -872,7 +872,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
               </button>
             </h3>
             {records.length === 0 ? (
-              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 500, padding: 8 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500, padding: 8 }}>
                 No saved monitoring records in this range.
               </div>
             ) : (
@@ -914,7 +914,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
       )}
 
       {msg && (
-        <div style={{ textAlign: 'center', marginTop: 10, fontSize: 12, fontWeight: 600, color: '#166534' }}>
+        <div style={{ textAlign: 'center', marginTop: 10, fontSize: 12, fontWeight: 600, color: 'var(--success-text)' }}>
           {msg}
         </div>
       )}
@@ -948,11 +948,11 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
             </div>
             <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
               {auditLoading ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 12, fontSize: 12, color: '#64748b', fontWeight: 600 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 12, fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>
                   <Loader2 size={13} className="animate-spin" /> Loading save history…
                 </div>
               ) : auditEntries.length === 0 ? (
-                <div style={{ fontSize: 12, color: '#64748b', fontWeight: 500, padding: 12 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500, padding: 12 }}>
                   No save history recorded for this record yet.
                 </div>
               ) : (
@@ -971,9 +971,9 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
                         <td className="px-4 py-3 text-slate-700">{a.saved_by || '-'}</td>
                         <td className="px-4 py-3">
                           {a.action === 'create' ? (
-                            <span style={{ fontSize: 11, fontWeight: 700, color: '#15803d', backgroundColor: '#dcfce7', border: '1px solid #bbf7d0', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>Created</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--green-tag-text)', backgroundColor: 'var(--green-tag-bg)', border: '1px solid var(--green-tag-border)', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>Created</span>
                           ) : (
-                            <span style={{ fontSize: 11, fontWeight: 700, color: '#b45309', backgroundColor: '#fef3c7', border: '1px solid #fde68a', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>Overwritten</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--amber-tag-text)', backgroundColor: 'var(--amber-tag-bg)', border: '1px solid var(--amber-tag-border)', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>Overwritten</span>
                           )}
                         </td>
                       </tr>

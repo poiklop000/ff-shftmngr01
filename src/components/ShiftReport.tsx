@@ -32,8 +32,8 @@ function yieldColors(raw: string): { color: string; fontWeight: number } | null 
   const val = (raw || '').replace(/%/g, '').trim();
   if (val === '') return null;
   return parseFloat(val) < 97.0
-    ? { color: '#b91c1c', fontWeight: 700 }
-    : { color: '#166534', fontWeight: 700 };
+    ? { color: 'var(--danger-text)', fontWeight: 700 }
+    : { color: 'var(--success-text)', fontWeight: 700 };
 }
 
 /**
@@ -75,7 +75,7 @@ export function ShiftReport({ shift, date, hours, boardData, notes, sku, downtim
           Free-Flow Performance Board — {SHIFT_LABELS[shift]} · {date || 'No date selected'}
         </h3>
         <div className="card-row sku-card" style={{ marginTop: 12, flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
-          <label style={{ fontSize: 11, fontWeight: 700, color: '#1e3a8a', textTransform: 'uppercase', letterSpacing: '0.3px', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.3px', display: 'flex', alignItems: 'center', gap: 4 }}>
             <Package size={13} />
             SKUs:
           </label>
@@ -86,10 +86,10 @@ export function ShiftReport({ shift, date, hours, boardData, notes, sku, downtim
                 const product = rest.join(' ');
                 return (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: '#1d4ed8', backgroundColor: '#dbeafe', border: '1px solid #bfdbfe', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--blue-tag-text)', backgroundColor: 'var(--blue-tag-bg)', border: '1px solid var(--blue-tag-border)', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>
                       {jobName}
                     </span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: '#1e3a8a', lineHeight: 1.4 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--app-fg)', lineHeight: 1.4 }}>
                       {product}
                     </span>
                   </div>
@@ -97,7 +97,7 @@ export function ShiftReport({ shift, date, hours, boardData, notes, sku, downtim
               })}
             </div>
           ) : (
-            <span style={{ fontSize: 12, color: '#64748b', fontWeight: 500 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>
               No active jobs captured for this shift yet.
             </span>
           )}
@@ -108,13 +108,13 @@ export function ShiftReport({ shift, date, hours, boardData, notes, sku, downtim
         <div className="card card-green">
           <div className="card-row">
             <span>Shift Total Output:</span>
-            <span style={{ fontWeight: 'bold', fontSize: 14, color: '#166534' }}>{totalOutput}</span>
+            <span style={{ fontWeight: 'bold', fontSize: 14, color: 'var(--success-text)' }}>{totalOutput}</span>
           </div>
         </div>
         <div className="card card-teal">
           <div className="card-row">
             <span>Shift Average OEE:</span>
-            <span style={{ fontWeight: 'bold', fontSize: 14, color: '#115e59' }}>{avgOee}%</span>
+            <span style={{ fontWeight: 'bold', fontSize: 14, color: 'var(--teal-tag-text)' }}>{avgOee}%</span>
           </div>
         </div>
       </div>
@@ -148,7 +148,7 @@ export function ShiftReport({ shift, date, hours, boardData, notes, sku, downtim
           <tbody>
             {rowCount === 0 ? (
               <tr>
-                <td colSpan={9} style={{ padding: '30px', color: '#64748b', fontSize: '14px' }}>
+                <td colSpan={9} style={{ padding: '30px', color: 'var(--text-muted)', fontSize: '14px' }}>
                   No monitoring rows saved for this shift.
                 </td>
               </tr>

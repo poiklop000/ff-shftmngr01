@@ -3,15 +3,15 @@ import { Activity, Loader2, RefreshCw, History } from 'lucide-react';
 import { fetchAlertHistory, type AlertLogRow } from '@/lib/alertLog';
 
 const ALERT_TYPE_COLORS: Record<string, { bg: string; color: string; border: string }> = {
-  occurred: { bg: '#fee2e2', color: '#b91c1c', border: '#fecaca' },
-  escalation: { bg: '#fff7ed', color: '#c2410c', border: '#fed7aa' },
-  resolved: { bg: '#dcfce7', color: '#166534', border: '#bbf7d0' },
-  recurring: { bg: '#fef3c7', color: '#b45309', border: '#fde68a' },
+  occurred: { bg: 'var(--red-tag-bg)', color: 'var(--red-tag-text)', border: 'var(--red-tag-border)' },
+  escalation: { bg: 'var(--amber-tag-bg)', color: 'var(--amber-tag-text)', border: 'var(--amber-tag-border)' },
+  resolved: { bg: 'var(--green-tag-bg)', color: 'var(--green-tag-text)', border: 'var(--green-tag-border)' },
+  recurring: { bg: 'var(--amber-tag-bg)', color: 'var(--amber-tag-text)', border: 'var(--amber-tag-border)' },
   test: { bg: '#ede9fe', color: '#6b21a8', border: '#ddd6fe' },
 };
 
 function typeColor(type: string): { bg: string; color: string; border: string } {
-  return ALERT_TYPE_COLORS[type] ?? { bg: '#f1f5f9', color: '#334155', border: '#cbd5e1' };
+  return ALERT_TYPE_COLORS[type] ?? { bg: 'var(--slate-tag-bg)', color: 'var(--slate-tag-text)', border: 'var(--slate-tag-border)' };
 }
 
 function formatAuckland(iso: string): string {
@@ -85,16 +85,16 @@ export function AlertHistory() {
 
       <div className="card-row" style={{ flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, fontWeight: 800, color: '#1e40af', backgroundColor: '#dbeafe', border: '1px solid #bfdbfe', borderRadius: 999, padding: '3px 10px', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--blue-tag-text)', backgroundColor: 'var(--blue-tag-bg)', border: '1px solid var(--blue-tag-border)', borderRadius: 999, padding: '3px 10px', whiteSpace: 'nowrap' }}>
             {counts.sent} sent
           </span>
           {counts.failed > 0 && (
-            <span style={{ fontSize: 11, fontWeight: 800, color: '#b91c1c', backgroundColor: '#fee2e2', border: '1px solid #fecaca', borderRadius: 999, padding: '3px 10px', whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--red-tag-text)', backgroundColor: 'var(--red-tag-bg)', border: '1px solid var(--red-tag-border)', borderRadius: 999, padding: '3px 10px', whiteSpace: 'nowrap' }}>
               {counts.failed} failed
             </span>
           )}
           {Object.entries(counts.byType).map(([t, n]) => (
-            <span key={t} style={{ fontSize: 11, fontWeight: 700, color: '#334155', backgroundColor: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 999, padding: '3px 10px', whiteSpace: 'nowrap' }}>
+            <span key={t} style={{ fontSize: 11, fontWeight: 700, color: 'var(--slate-tag-text)', backgroundColor: 'var(--slate-tag-bg)', border: '1px solid var(--slate-tag-border)', borderRadius: 999, padding: '3px 10px', whiteSpace: 'nowrap' }}>
               {t}: {n}
             </span>
           ))}
@@ -105,12 +105,12 @@ export function AlertHistory() {
             placeholder="Search message, reason…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid #cbd5e1', maxWidth: 180 }}
+            style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--input-border)', backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', maxWidth: 180 }}
           />
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid #cbd5e1', color: '#0f172a', backgroundColor: '#fff' }}
+            style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--input-border)', color: 'var(--input-text)', backgroundColor: 'var(--input-bg)' }}
           >
             <option value="All">All Types</option>
             {['occurred', 'escalation', 'resolved', 'recurring', 'test'].map((t) => (
@@ -121,17 +121,17 @@ export function AlertHistory() {
       </div>
 
       {error && (
-        <div style={{ fontSize: 12, color: '#b91c1c', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 10px', fontWeight: 600, marginTop: 10 }}>
+        <div style={{ fontSize: 12, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: 8, padding: '8px 10px', fontWeight: 600, marginTop: 10 }}>
           {error}
         </div>
       )}
 
       {loading && rows.length === 0 ? (
-        <div className="card-scroll" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 16, fontSize: 13, color: '#64748b', fontWeight: 600 }}>
+        <div className="card-scroll" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 16, fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>
           <Activity size={15} /> Loading alert history…
         </div>
       ) : filtered.length === 0 ? (
-        <div className="card-scroll" style={{ padding: 16, fontSize: 12, color: '#64748b', fontWeight: 500 }}>
+        <div className="card-scroll" style={{ padding: 16, fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>
           {rows.length === 0 ? 'No alerts have been sent yet. Send a test alert from Settings to verify the pipeline.' : 'No alerts match the current filter.'}
         </div>
       ) : (
@@ -159,7 +159,7 @@ export function AlertHistory() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <span style={{ fontSize: 11, fontWeight: 700, color: r.status === 'sent' ? '#166534' : '#b91c1c' }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: r.status === 'sent' ? 'var(--success-text)' : 'var(--danger-text)' }}>
                         {r.status === 'sent' ? 'Sent' : 'Failed'}
                         {r.http_status != null ? ` · ${r.http_status}` : ''}
                       </span>

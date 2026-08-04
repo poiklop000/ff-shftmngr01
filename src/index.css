@@ -947,6 +947,38 @@ tbody tr:hover { background-color: #eff6ff; }
   --card-bg: #ffffff;
   --card-border: #e2e8f0;
   --modal-bg: #ffffff;
+  --input-bg: #ffffff;
+  --input-border: #cbd5e1;
+  --input-text: #0f172a;
+  --track-bg: #e2e8f0;
+  --text-muted: #64748b;
+  --text-faint: #475569;
+  --btn-sec-bg: #e2e8f0;
+  --btn-sec-text: #0f172a;
+  --danger-bg: #fef2f2;
+  --danger-border: #fecaca;
+  --danger-text: #b91c1c;
+  --success-bg: #f0fdf4;
+  --success-border: #bbf7d0;
+  --success-text: #166534;
+  --blue-tag-bg: #dbeafe;
+  --blue-tag-border: #bfdbfe;
+  --blue-tag-text: #1e40af;
+  --green-tag-bg: #dcfce7;
+  --green-tag-border: #bbf7d0;
+  --green-tag-text: #166534;
+  --amber-tag-bg: #fef3c7;
+  --amber-tag-border: #fde68a;
+  --amber-tag-text: #92400e;
+  --red-tag-bg: #fee2e2;
+  --red-tag-border: #fecaca;
+  --red-tag-text: #b91c1c;
+  --slate-tag-bg: #f1f5f9;
+  --slate-tag-border: #cbd5e1;
+  --slate-tag-text: #334155;
+  --teal-tag-bg: #f0fdfa;
+  --teal-tag-border: #99f6e4;
+  --teal-tag-text: #115e59;
 }
 
 html[data-theme='dark'] {
@@ -955,6 +987,38 @@ html[data-theme='dark'] {
   --card-bg: #111a2e;
   --card-border: #26334d;
   --modal-bg: #0f172a;
+  --input-bg: #1e293b;
+  --input-border: #334155;
+  --input-text: #e2e8f0;
+  --track-bg: #293548;
+  --text-muted: #94a3b8;
+  --text-faint: #cbd5e1;
+  --btn-sec-bg: #293548;
+  --btn-sec-text: #e2e8f0;
+  --danger-bg: #2a1114;
+  --danger-border: #7f1d1d;
+  --danger-text: #fca5a5;
+  --success-bg: #0c2a1f;
+  --success-border: #14532d;
+  --success-text: #bbf7d0;
+  --blue-tag-bg: #1e3a6e;
+  --blue-tag-border: #1e3a6e;
+  --blue-tag-text: #93c5fd;
+  --green-tag-bg: #14532d;
+  --green-tag-border: #14532d;
+  --green-tag-text: #bbf7d0;
+  --amber-tag-bg: #713f12;
+  --amber-tag-border: #713f12;
+  --amber-tag-text: #fde68a;
+  --red-tag-bg: #7f1d1d;
+  --red-tag-border: #7f1d1d;
+  --red-tag-text: #fca5a5;
+  --slate-tag-bg: #293548;
+  --slate-tag-border: #475569;
+  --slate-tag-text: #cbd5e1;
+  --teal-tag-bg: #0a2b2c;
+  --teal-tag-border: #134e4a;
+  --teal-tag-text: #5eead4;
 }
 
 html[data-theme='dark'] body {

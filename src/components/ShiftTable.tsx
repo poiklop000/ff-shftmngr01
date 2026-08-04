@@ -35,7 +35,7 @@ export function ShiftTable({ hours, rows, rowCount, onRowChange, onToggle }: Shi
         <tbody>
           {rowCount === 0 ? (
             <tr>
-              <td colSpan={9} style={{ padding: '30px', color: '#64748b', fontSize: '14px' }}>
+              <td colSpan={9} style={{ padding: '30px', color: 'var(--text-muted)', fontSize: '14px' }}>
                 Configure your custom start time, end time, and interval above, then click &quot;Generate Table&quot;.
               </td>
             </tr>

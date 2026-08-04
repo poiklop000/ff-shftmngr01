@@ -112,7 +112,7 @@ function Row({ index, rowCount, hour, row, onChange, onToggle }: RowProps) {
 
   return (
     <tr>
-      <td style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', color: '#334155' }}>
+      <td style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', color: 'var(--app-fg)' }}>
         {hour}
       </td>
       <td>

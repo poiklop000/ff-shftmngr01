@@ -1225,3 +1225,82 @@ html[data-theme='dark'] .text-purple-900 { color: #ddd6fe !important; }
 html[data-theme='dark'] .text-purple-700 { color: #c4b5fd !important; }
 html[data-theme='dark'] .border-purple-200 { border-color: #4c1d95 !important; }
 html[data-theme='dark'] .border-purple-100 { border-color: #4c1d95 !important; }
+
+/* ---- Brand text on dark surfaces ---- */
+html[data-theme='dark'] .text-brand-900 { color: #bfdbfe !important; }
+html[data-theme='dark'] .text-brand-700 { color: #93c5fd !important; }
+html[data-theme='dark'] .text-brand-600 { color: #93c5fd !important; }
+html[data-theme='dark'] .text-brand-500 { color: #93c5fd !important; }
+
+/* ---- Extra surface/tag utilities ---- */
+html[data-theme='dark'] .bg-green-100 { background-color: #14532d !important; }
+html[data-theme='dark'] .bg-green-200 { background-color: #166534 !important; }
+html[data-theme='dark'] .bg-red-100 { background-color: #7f1d1d !important; }
+html[data-theme='dark'] .bg-yellow-100 { background-color: #713f12 !important; }
+html[data-theme='dark'] .bg-blue-100 { background-color: #1e3a6e !important; }
+html[data-theme='dark'] .bg-amber-50 { background-color: #2b2313 !important; }
+html[data-theme='dark'] .text-amber-900 { color: #fde68a !important; }
+html[data-theme='dark'] .border-amber-200 { border-color: #713f12 !important; }
+html[data-theme='dark'] .text-red-600 { color: #fca5a5 !important; }
+html[data-theme='dark'] .text-yellow-700 { color: #fde68a !important; }
+
+/* ---- Floating bottom tab bar ---- */
+html[data-theme='dark'] .bottom-tab-bar {
+  background-color: rgba(17, 26, 46, 0.78);
+  border-color: rgba(71, 85, 105, 0.6);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.55), 0 4px 10px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+html[data-theme='dark'] .bottom-tab-btn { color: #94a3b8; }
+html[data-theme='dark'] .bottom-tab-btn:hover { color: #93c5fd; }
+html[data-theme='dark'] .bottom-tab-btn.active { color: #ffffff; }
+html[data-theme='dark'] .bottom-tab-indicator {
+  background-color: #2563eb;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.45);
+}
+
+/* ---- Monitoring shift table ---- */
+html[data-theme='dark'] .toggle-btn.neutral {
+  background-color: #293548;
+  border-color: #475569;
+  color: #94a3b8;
+}
+html[data-theme='dark'] .oee-pass { color: #86efac; }
+html[data-theme='dark'] .oee-fail { color: #fca5a5; }
+html[data-theme='dark'] .table-input.yield-input-red { color: #fca5a5 !important; }
+html[data-theme='dark'] .table-input.yield-input-green { color: #86efac !important; }
+
+/* ---- Custom interval panel inputs/labels ---- */
+html[data-theme='dark'] .custom-interval-panel label { color: #93c5fd; }
+html[data-theme='dark'] .custom-interval-panel input[type="time"],
+html[data-theme='dark'] .custom-interval-panel select {
+  background-color: #1e293b;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+/* ---- Card table headers (Analytics tables inside coloured cards) ---- */
+html[data-theme='dark'] .card-blue .card-scroll thead th { background: #0f1f3d; color: #93c5fd; }
+html[data-theme='dark'] .card-green .card-scroll thead th { background: #0c2a1f; color: #86efac; }
+html[data-theme='dark'] .card-teal .card-scroll thead th { background: #0a2b2c; color: #5eead4; }
+
+/* ---- Live counter table ---- */
+html[data-theme='dark'] .live-counter-table .hour-cell { color: #cbd5e1; }
+html[data-theme='dark'] .live-counter-table .num-cell { color: #93c5fd; }
+html[data-theme='dark'] .live-counter-table .total-num { color: #93c5fd; }
+html[data-theme='dark'] .live-counter-table tfoot td {
+  background-color: #1e293b;
+  border-top-color: #2563eb;
+  color: #e2e8f0;
+}
+
+/* ---- Page help ---- */
+html[data-theme='dark'] .page-help-intro { color: #cbd5e1; }
+html[data-theme='dark'] .page-help-list li { color: #94a3b8; }
+html[data-theme='dark'] .page-help-section-title { color: #93c5fd; }
+html[data-theme='dark'] .page-help-toggle:hover { background-color: #1e3a6e; }
+
+/* ---- Footer ---- */
+html[data-theme='dark'] .footer strong { color: #93c5fd; }
+
+/* ---- Timeline now marker (visible on dark track) ---- */
+html[data-theme='dark'] .relative.h-9 .bg-slate-700 { background-color: #cbd5e1 !important; }

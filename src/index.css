@@ -940,6 +940,8 @@ tbody tr:hover { background-color: #eff6ff; }
 /* =========================================================
    Dark theme — toggled via <html data-theme="dark">
    Light values are the default; these override key surfaces.
+   Scoped to @media screen so the printed report always uses
+   the light palette (dark rules never apply in print).
    ========================================================= */
 :root {
   --app-bg: #f8fafc;
@@ -981,6 +983,7 @@ tbody tr:hover { background-color: #eff6ff; }
   --teal-tag-text: #115e59;
 }
 
+@media screen {
 html[data-theme='dark'] {
   --app-bg: #0b1220;
   --app-fg: #e2e8f0;
@@ -1304,6 +1307,7 @@ html[data-theme='dark'] .footer strong { color: #93c5fd; }
 
 /* ---- Timeline now marker (visible on dark track) ---- */
 html[data-theme='dark'] .relative.h-9 .bg-slate-700 { background-color: #cbd5e1 !important; }
+} /* /@media screen — dark theme never applies when printing */
 
 /* =========================================================
    Saved/print report stays light even in dark mode

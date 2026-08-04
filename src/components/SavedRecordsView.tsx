@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { FileDown, Loader2, ExternalLink, Printer, History, X } from 'lucide-react';
 import { PageHelp } from '@/components/PageHelp';
 import { ShiftReport } from '@/components/ShiftReport';
@@ -18,7 +19,6 @@ export function SavedRecordsView() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [reportRecord, setReportRecord] = useState<MonitoringRecord | null>(null);
-  const [printRecord, setPrintRecord] = useState<MonitoringRecord | null>(null);
   const [auditRecord, setAuditRecord] = useState<MonitoringRecord | null>(null);
   const [auditEntries, setAuditEntries] = useState<MonitoringRecordAudit[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -79,20 +79,56 @@ export function SavedRecordsView() {
   };
 
   const handlePrintReport = (r: MonitoringRecord) => {
-    setPrintRecord(r);
-    document.body.classList.add('printing-saved-report');
-    const original = document.title;
-    const reportName = `FF_${r.shift_name}${r.record_date ? `_${r.record_date}` : ''}`;
-    document.title = reportName;
-    const restore = () => {
-      document.title = original;
-      document.body.classList.remove('printing-saved-report');
-      setPrintRecord(null);
-      window.removeEventListener('afterprint', restore);
+    // Print from an isolated hidden iframe instead of the live page. On iOS
+    // Safari, window.print() snapshots the current page DOM — if React hasn't
+    // rendered the report yet or the device is rotated, the "Saved Monitoring
+    // Records" list gets printed instead of the report. A dedicated document
+    // that contains only the report can never print the list.
+    const reportHtml = renderToStaticMarkup(
+      <ShiftReport
+        shift={r.shift_name as Shift}
+        date={r.record_date}
+        hours={r.hours?.length ? r.hours : getActiveHours(r.shift_name as Shift, [])}
+        boardData={r.board_data}
+        notes={r.notes ?? ''}
+        sku={r.sku ?? ''}
+        downtimeEvents={r.downtime_snapshot ?? []}
+      />,
+    );
+    const css = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+      .map((el) => el.outerHTML)
+      .join('\n');
+    const title = `FF_${r.shift_name}${r.record_date ? `_${r.record_date}` : ''}`;
+
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.style.cssText = 'position: fixed; left: -9999px; top: 0; width: 2px; height: 2px; border: 0;';
+    document.body.appendChild(iframe);
+    const doc = iframe.contentDocument;
+    if (!doc) {
+      document.body.removeChild(iframe);
+      return;
+    }
+    doc.open();
+    doc.write(`<!DOCTYPE html><html><head>${css}<title>${title}</title></head><body>${reportHtml}</body></html>`);
+    doc.close();
+
+    const win = iframe.contentWindow!;
+    let printed = false;
+    const printNow = () => {
+      if (printed) return;
+      printed = true;
+      win.focus();
+      win.print();
     };
-    window.addEventListener('afterprint', restore);
-    window.setTimeout(restore, 60_000);
-    window.setTimeout(() => window.print(), 150);
+    const cleanup = () => {
+      if (iframe.parentNode) document.body.removeChild(iframe);
+    };
+    win.addEventListener('load', printNow);
+    win.addEventListener('afterprint', cleanup);
+    window.setTimeout(printNow, 1500);
+    window.setTimeout(cleanup, 90_000);
+    setMsg('Report sent to printer');
   };
 
   return (
@@ -253,20 +289,6 @@ export function SavedRecordsView() {
               downtimeEvents={reportRecord.downtime_snapshot ?? []}
             />
           </div>
-        </div>
-      )}
-
-      {printRecord && (
-        <div className="print-only">
-          <ShiftReport
-            shift={printRecord.shift_name as Shift}
-            date={printRecord.record_date}
-            hours={printRecord.hours?.length ? printRecord.hours : getActiveHours(printRecord.shift_name as Shift, [])}
-            boardData={printRecord.board_data}
-            notes={printRecord.notes ?? ''}
-            sku={printRecord.sku ?? ''}
-            downtimeEvents={printRecord.downtime_snapshot ?? []}
-          />
         </div>
       )}
 

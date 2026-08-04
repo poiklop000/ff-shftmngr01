@@ -142,18 +142,16 @@ export function DashboardView({ date, currentShift, customHours, isAdmin = false
     () => filterByShiftWindow(summaryHook.data?.hourly ?? [], currentShift, customHours, date, (e) => e.startText, (e) => e.hour),
     [summaryHook.data, currentShift, customHours, date],
   );
-  const totalIn = useMemo(() => shiftSummary.reduce((s, e) => s + e.in, 0), [shiftSummary]);
-  const totalOut = useMemo(() => shiftSummary.reduce((s, e) => s + e.out, 0), [shiftSummary]);
-  const avgEfficiency = useMemo(() => {
-    let sum = 0;
-    let count = 0;
-    for (const h of shiftSummary) {
-      if (h.rated > 0) {
-        sum += (h.out / h.rated) * 100;
-        count++;
-      }
+
+  // OFS labels each hour bucket with its END time, so the entry at H holds the
+  // production for H-1..H. Display each entry one hour earlier so "18:00"
+  // shows the output produced between 18:00 and 19:00.
+  const shiftedRows = useMemo(() => {
+    const rows: { hour: string; output: number }[] = [];
+    for (let i = 0; i < shiftSummary.length - 1; i++) {
+      rows.push({ hour: shiftSummary[i].hour, output: shiftSummary[i + 1].in });
     }
-    return count > 0 ? sum / count : 0;
+    return rows;
   }, [shiftSummary]);
 
   const maxReasonMs = summaryHook.data?.reasons.reduce((m, r) => Math.max(m, r.ms), 0) ?? 0;
@@ -279,45 +277,30 @@ export function DashboardView({ date, currentShift, customHours, isAdmin = false
               {SHIFT_LABELS[currentShift]} · Today's Production
             </h3>
           </div>
-          <div className="grid grid-cols-3 gap-3 mb-3">
-            <div>
-              <div className="text-[11px] font-bold uppercase tracking-wide opacity-70 mb-0.5">Output</div>
-              <div className="text-[15px] font-bold">{totalOut.toLocaleString()}</div>
-            </div>
-            <div>
-              <div className="text-[11px] font-bold uppercase tracking-wide opacity-70 mb-0.5">Throughput</div>
-              <div className="text-[15px] font-bold">{totalIn.toLocaleString()}</div>
-            </div>
-            <div>
-              <div className="text-[11px] font-bold uppercase tracking-wide opacity-70 mb-0.5">Efficiency</div>
-              <div className="text-[15px] font-bold">{avgEfficiency.toFixed(1)}%</div>
-            </div>
-          </div>
-          {shiftSummary.length === 0 ? (
+          {shiftedRows.length === 0 ? (
             <div className="text-[13px] font-medium text-green-700">No hourly data for this shift yet.</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="text-[12px] w-max min-w-full">
                 <thead>
                   <tr className="text-[11px] font-bold uppercase tracking-wide text-green-800 border-b border-green-200">
-                    <th className="px-2 py-1.5 text-left">Hour</th>
-                    <th className="px-2 py-1.5 text-right">In</th>
-                    <th className="px-2 py-1.5 text-right">Out</th>
-                    <th className="px-2 py-1.5 text-right">Eff</th>
+                    <th className="px-2 py-1.5 text-left">Time</th>
+                    <th className="px-2 py-1.5 text-right">Rated Speed</th>
+                    <th className="px-2 py-1.5 text-right">Output</th>
+                    <th className="px-2 py-1.5 text-right">OEE</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {shiftSummary.map((entry, i) => {
-                    const eff = entry.rated > 0 ? ((entry.out / entry.rated) * 100).toFixed(1) : '0.0';
-                    return (
-                      <tr key={i} className="border-b border-green-100">
-                        <td className="px-2 py-1.5 font-semibold text-left">{entry.hour}</td>
-                        <td className="px-2 py-1.5 text-right">{entry.in.toLocaleString()}</td>
-                        <td className="px-2 py-1.5 text-right">{entry.out.toLocaleString()}</td>
-                        <td className="px-2 py-1.5 text-right font-semibold">{eff}%</td>
-                      </tr>
-                    );
-                  })}
+                  {shiftedRows.map((row, i) => (
+                    <tr key={i} className="border-b border-green-100">
+                      <td className="px-2 py-1.5 font-semibold text-left">{row.hour}</td>
+                      <td className="px-2 py-1.5 text-right">{ratedSpeed > 0 ? ratedSpeed.toLocaleString() : '-'}</td>
+                      <td className="px-2 py-1.5 text-right">{row.output.toLocaleString()}</td>
+                      <td className="px-2 py-1.5 text-right font-semibold">
+                        {ratedSpeed > 0 ? `${((row.output / ratedSpeed) * 100).toFixed(2)}%` : '-'}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Calculator, ClipboardList, Activity, TimerOff, Settings, Calendar, Clock, BarChart3, Shield, LogOut, Database, Loader2 } from 'lucide-react';
+import { Calculator, ClipboardList, Activity, TimerOff, Settings, Calendar, Clock, BarChart3, Shield, LogOut, Database, Loader2, LayoutDashboard, Moon, Sun, Maximize2, Minimize2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { useTheme } from '@/lib/theme';
+import { DashboardView } from '@/components/DashboardView';
 import { AnalyticsView } from '@/components/AnalyticsView';
 import { CalculatorView } from '@/components/CalculatorView';
 import { DowntimeHistory } from '@/components/DowntimeHistory';
@@ -36,16 +38,16 @@ import { saveMonitoringRecord, loadMonitoringRecord, buildActiveJobSnapshot, typ
 import { fetchOfsStatus } from '@/lib/ofs';
 import { syncAllData } from '@/lib/captureSync';
 
-type View = 'calculator' | 'tracker' | 'live' | 'downtime' | 'analytics' | 'admin';
+type View = 'dashboard' | 'calculator' | 'tracker' | 'live' | 'downtime' | 'analytics' | 'admin';
 const VIEW_KEY = 'canning_calc_view';
-const VALID_VIEWS: View[] = ['calculator', 'tracker', 'live', 'downtime', 'analytics', 'admin'];
+const VALID_VIEWS: View[] = ['dashboard', 'calculator', 'tracker', 'live', 'downtime', 'analytics', 'admin'];
 
 // Pages each role is allowed to open.
 const ROLE_ACCESS: Record<Role, View[]> = {
-  operator: ['live', 'downtime', 'calculator'],
-  team_lead: ['live', 'tracker', 'downtime', 'calculator'],
-  manager: ['live', 'tracker', 'downtime', 'calculator', 'analytics'],
-  admin: ['live', 'tracker', 'downtime', 'calculator', 'analytics', 'admin'],
+  operator: ['dashboard', 'live', 'downtime', 'calculator'],
+  team_lead: ['dashboard', 'live', 'tracker', 'downtime', 'calculator'],
+  manager: ['dashboard', 'live', 'tracker', 'downtime', 'calculator', 'analytics'],
+  admin: ['dashboard', 'live', 'tracker', 'downtime', 'calculator', 'analytics', 'admin'],
 };
 
 // Deep-clone the data for an immutable update, but keep the customHours array
@@ -61,7 +63,7 @@ function cloneData(prev: AppData): AppData {
 export default function App() {
   const [view, setView] = useState<View>(() => {
     const saved = localStorage.getItem(VIEW_KEY) as View | null;
-    return saved && VALID_VIEWS.includes(saved) ? saved : 'live';
+    return saved && VALID_VIEWS.includes(saved) ? saved : 'dashboard';
   });
 
   // Deep links from Teams alert cards (e.g. .../#/analytics) select the matching view.
@@ -83,6 +85,42 @@ export default function App() {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncTick, setSyncTick] = useState(0);
+
+  const { theme, toggleTheme } = useTheme();
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [kiosk, setKiosk] = useState(() => {
+    try {
+      return localStorage.getItem('canning_kiosk') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      document.documentElement.requestFullscreen().catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  // Kiosk mode: enter fullscreen automatically on load and keep the preference.
+  useEffect(() => {
+    try {
+      localStorage.setItem('canning_kiosk', String(kiosk));
+    } catch {
+      // ignore storage failures
+    }
+    if (kiosk) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    }
+  }, [kiosk]);
 
   const [authReady, setAuthReady] = useState(false);
   const [session, setSession] = useState<Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session']>(null);
@@ -554,6 +592,7 @@ function epochToConsoleTime(
   const effectiveView: View = allowedViews.includes(view) ? view : allowedViews[0]!;
 
   const ALL_NAV: { id: View; label: string; Icon: LucideIcon }[] = [
+    { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
     { id: 'live', label: 'Live', Icon: Activity },
     { id: 'tracker', label: 'Monitoring', Icon: ClipboardList },
     { id: 'downtime', label: 'Downtime', Icon: TimerOff },
@@ -564,11 +603,11 @@ function epochToConsoleTime(
   const navItems = ALL_NAV.filter((n) => allowedViews.includes(n.id));
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc', color: '#1e293b' }}>
+    <div style={{ minHeight: '100vh', backgroundColor: 'var(--app-bg, #f8fafc)', color: 'var(--app-fg, #1e293b)' }}>
       <div className="app-bar">
         <div className="app-bar-inner">
           <span className="app-bar-title">Free-Flow Manufacturing<br />Krones Canning Line Console</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
             {profile && (
               <span style={{ fontSize: 13, fontWeight: 700, color: '#ffffff', background: 'rgba(255,255,255,0.18)', borderRadius: 999, padding: '5px 12px' }}>
                 {profile.display_name}
@@ -599,6 +638,54 @@ function epochToConsoleTime(
             >
               <LogOut size={16} />
               Logout
+            </button>
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid rgba(255,255,255,0.35)',
+                background: 'rgba(255,255,255,0.15)',
+                color: '#ffffff',
+                width: 34,
+                height: 34,
+                borderRadius: 999,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                transition: 'background-color 0.2s, transform 0.1s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(255,255,255,0.28)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(255,255,255,0.15)'; }}
+            >
+              {isFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+            </button>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label="Toggle dark mode"
+              title="Toggle dark / light mode"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid rgba(255,255,255,0.35)',
+                background: 'rgba(255,255,255,0.15)',
+                color: '#ffffff',
+                width: 34,
+                height: 34,
+                borderRadius: 999,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                transition: 'background-color 0.2s, transform 0.1s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(255,255,255,0.28)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(255,255,255,0.15)'; }}
+            >
+              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
             </button>
             <div className="app-bar-actions">
               <button
@@ -701,7 +788,14 @@ function epochToConsoleTime(
       </div>
 
       <div className="sm-container" style={{ paddingTop: 20, paddingBottom: 80 }}>
-        {effectiveView === 'calculator' ? (
+        {effectiveView === 'dashboard' ? (
+          <DashboardView
+            date={data.date}
+            currentShift={data.shift}
+            customHours={data.customHours}
+            isAdmin={profile?.role === 'admin'}
+          />
+        ) : effectiveView === 'calculator' ? (
           <CalculatorView
             calc={calcMemo}
             onChange={handleCalcChange}
@@ -722,7 +816,7 @@ function epochToConsoleTime(
             customHours={data.customHours}
           />
         ) : effectiveView === 'analytics' ? (
-          <AnalyticsView onOpenRecord={handleOpenRecordFromAnalytics} syncTick={syncTick} />
+          <AnalyticsView onOpenRecord={handleOpenRecordFromAnalytics} syncTick={syncTick} isAdmin={profile?.role === 'admin'} />
         ) : effectiveView === 'admin' ? (
           <AdminView currentUserId={currentUserId} />
         ) : (
@@ -769,7 +863,7 @@ function epochToConsoleTime(
         ))}
       </nav>
 
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} isAdmin={profile?.role === 'admin'} />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} isAdmin={profile?.role === 'admin'} kiosk={kiosk} onKioskChange={setKiosk} />
     </div>
   );
 }

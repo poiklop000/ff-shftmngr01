@@ -179,6 +179,18 @@ function buildRecurringIssueMessage(
   };
 }
 
+function buildTestMessage(): Record<string, unknown> {
+  return {
+    type: "AdaptiveCard",
+    version: "1.2",
+    body: [
+      { type: "TextBlock", text: "Teams Alert Test", weight: "Bolder", size: "Large", color: "Good" },
+      { type: "TextBlock", text: "This is a test notification from the Krones Canning Line Console. If you can read this, Teams alerts are configured correctly.", wrap: true },
+      { type: "TextBlock", text: "— Sent from the console settings", wrap: true, isSubtle: true, size: "Small" },
+    ],
+  };
+}
+
 function buildOccurredMessage(
   evt: DowntimeRow,
   ctx: JobContext | null,
@@ -307,7 +319,7 @@ function buildEscalationMessage(
 async function sendTeams(
   webhookUrl: string,
   payload: Record<string, unknown>,
-): Promise<boolean> {
+): Promise<{ ok: boolean; httpStatus: number | null }> {
   // The Teams "Send webhook alerts to a channel" workflow expects a message
   // envelope with the AdaptiveCard attached, not the bare card.
   const body = {
@@ -319,18 +331,58 @@ async function sendTeams(
       },
     ],
   };
-  const res = await fetch(webhookUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "<no body>");
+  let res: Response;
+  try {
+    res = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
     console.error(
-      `[teams-downtime-alert] webhook POST failed: ${res.status} ${res.statusText} — ${body.slice(0, 300)}`,
+      `[teams-downtime-alert] webhook POST threw: ${err instanceof Error ? err.message : err}`,
+    );
+    return { ok: false, httpStatus: null };
+  }
+  if (!res.ok) {
+    const respBody = await res.text().catch(() => "<no body>");
+    console.error(
+      `[teams-downtime-alert] webhook POST failed: ${res.status} ${res.statusText} — ${respBody.slice(0, 300)}`,
     );
   }
-  return res.ok;
+  return { ok: res.ok, httpStatus: res.status };
+}
+
+// Record every Teams notification (sent or failed) so the web app can show an
+// alert history. Runs with the service role, which bypasses RLS.
+interface AlertLogInput {
+  alertType: string;
+  eventId?: number | null;
+  reason: string | null;
+  category: string | null;
+  product: string | null;
+  message: string;
+  status: string;
+  httpStatus: number | null;
+}
+
+async function logAlert(
+  supabase: ReturnType<typeof getSupabase>,
+  input: AlertLogInput,
+): Promise<void> {
+  const { error } = await supabase.from("alert_log").insert({
+    alert_type: input.alertType,
+    event_id: input.eventId ?? null,
+    reason: input.reason,
+    category: input.category,
+    product: input.product,
+    message: input.message,
+    status: input.status,
+    http_status: input.httpStatus,
+  });
+  if (error) {
+    console.error(`[teams-downtime-alert] alert_log insert failed: ${error.message}`);
+  }
 }
 
 function json(body: unknown, status = 200): Response {
@@ -422,6 +474,31 @@ Deno.serve(async (req: Request) => {
       return json({ ok: true, skipped: true, alerted: 0, webhookConfigured: !!webhookUrl, enabled });
     }
 
+    // Test mode: a client (Settings → Send Test Alert) calls with {"test": true}
+    // to verify the webhook without waiting for a real downtime. Runs even if
+    // alerts are disabled, as long as a webhook URL is configured.
+    let testRequested = false;
+    try {
+      testRequested = (await req.clone().json())?.test === true;
+    } catch {
+      testRequested = false;
+    }
+    if (testRequested) {
+      const payload = buildTestMessage();
+      const res = await sendTeams(webhookUrl, payload);
+      await logAlert(supabase, {
+        alertType: "test",
+        eventId: null,
+        reason: null,
+        category: null,
+        product: null,
+        message: "Test Alert",
+        status: res.ok ? "sent" : "failed",
+        httpStatus: res.httpStatus,
+      });
+      return json({ ok: res.ok, alerted: res.ok ? 1 : 0, test: true });
+    }
+
     const nowMs = Date.now();
     const recentEndCutoffMs = nowMs - 10 * 60_000;
 
@@ -466,6 +543,7 @@ Deno.serve(async (req: Request) => {
       // Job context (product + rated speed) + fallback can rate
       const ctx = await findJobContext(supabase, evt.start_epoch);
       const ratePerHour = ctx?.ratePerHour ?? defaultRatePerHour;
+      const product = ctx?.orderName ?? ctx?.product;
 
       if (needsOccurred) {
         if (effectiveDurationMs < thresholdMs) {
@@ -473,8 +551,18 @@ Deno.serve(async (req: Request) => {
           continue;
         }
         const payload = buildOccurredMessage(evt, ctx, ratePerHour);
-        const sent = await sendTeams(webhookUrl, payload);
-        if (sent) {
+        const res = await sendTeams(webhookUrl, payload);
+        await logAlert(supabase, {
+          alertType: "occurred",
+          eventId: evt.id,
+          reason: evt.reason,
+          category: evt.category,
+          product,
+          message: `Downtime Started — ${evt.console_name ?? "Production Line"}`,
+          status: res.ok ? "sent" : "failed",
+          httpStatus: res.httpStatus,
+        });
+        if (res.ok) {
           // If the event is already past an escalation level, record the highest
           // one so a duplicate "still ongoing" alert isn't sent immediately.
           const crossed = escalationMinutes.filter((m) => effectiveDurationMs >= m * 60_000);
@@ -499,8 +587,18 @@ Deno.serve(async (req: Request) => {
           continue;
         }
         const payload = buildResolvedMessage(evt, ctx, ratePerHour);
-        const sent = await sendTeams(webhookUrl, payload);
-        if (sent) {
+        const res = await sendTeams(webhookUrl, payload);
+        await logAlert(supabase, {
+          alertType: "resolved",
+          eventId: evt.id,
+          reason: evt.reason,
+          category: evt.category,
+          product,
+          message: `Downtime Resolved — ${evt.console_name ?? "Production Line"}`,
+          status: res.ok ? "sent" : "failed",
+          httpStatus: res.httpStatus,
+        });
+        if (res.ok) {
           await supabase
             .from("downtime_events")
             .update({ resolved_alert_sent: true, updated_at: new Date().toISOString() })
@@ -519,8 +617,18 @@ Deno.serve(async (req: Request) => {
         for (const m of escalationMinutes) {
           if (effectiveDurationMs >= m * 60_000 && (evt.last_escalation_minutes ?? 0) < m) {
             const payload = buildEscalationMessage(evt, ctx, ratePerHour, m);
-            const sent = await sendTeams(webhookUrl, payload);
-            if (sent) {
+            const res = await sendTeams(webhookUrl, payload);
+            await logAlert(supabase, {
+              alertType: "escalation",
+              eventId: evt.id,
+              reason: evt.reason,
+              category: evt.category,
+              product,
+              message: `Downtime Still Ongoing — ${evt.console_name ?? "Production Line"} (${m} min)`,
+              status: res.ok ? "sent" : "failed",
+              httpStatus: res.httpStatus,
+            });
+            if (res.ok) {
               await supabase
                 .from("downtime_events")
                 .update({ last_escalation_minutes: m, updated_at: new Date().toISOString() })
@@ -611,8 +719,18 @@ Deno.serve(async (req: Request) => {
           nextThreshold,
           Array.from(group.lines),
         );
-        const sent = await sendTeams(webhookUrl, payload);
-        if (sent) {
+        const res = await sendTeams(webhookUrl, payload);
+        await logAlert(supabase, {
+          alertType: "recurring",
+          eventId: null,
+          reason: group.reason,
+          category: group.category,
+          product: null,
+          message: `Recurring Issue Detected (${group.count}× ${group.reason})`,
+          status: res.ok ? "sent" : "failed",
+          httpStatus: res.httpStatus,
+        });
+        if (res.ok) {
           const nowIso = new Date().toISOString();
           await supabase
             .from("recurring_issue_alerts")

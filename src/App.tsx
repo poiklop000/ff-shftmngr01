@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Calculator, ClipboardList, Activity, TimerOff, Settings, Calendar, Clock, BarChart3, Shield, LogOut, Database, Loader2, Moon, Sun, Maximize2, Minimize2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Calculator, ClipboardList, Activity, TimerOff, Settings, Calendar, Clock, BarChart3, Shield, LogOut, Database, Moon, Sun, Maximize2, Minimize2, MoreVertical } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useTheme } from '@/lib/theme';
 import { AnalyticsView } from '@/components/AnalyticsView';
@@ -10,7 +10,9 @@ import { MonitoringView } from '@/components/MonitoringView';
 import { SettingsModal } from '@/components/SettingsModal';
 import { LoginView } from '@/components/LoginView';
 import { AdminView } from '@/components/AdminView';
-import { signOut, fetchProfile, type AppProfile, type Role } from '@/lib/auth';
+import { SavedRecordsView } from '@/components/SavedRecordsView';
+import { signOut, fetchProfile, type AppProfile } from '@/lib/auth';
+import { ROLE_ACCESS, VALID_VIEWS, userAllowedViews, type View } from '@/lib/access';
 import { supabase } from '@/lib/supabase';
 import {
   computeHourlyOutputs,
@@ -32,22 +34,12 @@ import {
   type ToggleState,
 } from '@/types';
 import { fetchCounterLogsByDate } from '@/lib/counterLogs';
-import { fetchDowntimeByDate } from '@/lib/downtime';
+import { fetchDowntimeForShift, type DowntimeEvent } from '@/lib/downtime';
 import { saveMonitoringRecord, loadMonitoringRecord, buildActiveJobSnapshot, type ActiveJobSnapshot } from '@/lib/monitoring';
 import { fetchOfsStatus } from '@/lib/ofs';
 import { syncAllData } from '@/lib/captureSync';
 
-type View = 'calculator' | 'tracker' | 'live' | 'downtime' | 'analytics' | 'admin';
 const VIEW_KEY = 'canning_calc_view';
-const VALID_VIEWS: View[] = ['calculator', 'tracker', 'live', 'downtime', 'analytics', 'admin'];
-
-// Pages each role is allowed to open.
-const ROLE_ACCESS: Record<Role, View[]> = {
-  operator: ['live', 'downtime', 'calculator'],
-  team_lead: ['live', 'tracker', 'downtime', 'calculator'],
-  manager: ['live', 'tracker', 'downtime', 'calculator', 'analytics'],
-  admin: ['live', 'tracker', 'downtime', 'calculator', 'analytics', 'admin'],
-};
 
 // Deep-clone the data for an immutable update, but keep the customHours array
 // reference stable. Without this, every edit gives customHours a new identity,
@@ -62,8 +54,10 @@ function cloneData(prev: AppData): AppData {
 export default function App() {
   const [view, setView] = useState<View>(() => {
     const saved = localStorage.getItem(VIEW_KEY) as View | null;
-    return saved && VALID_VIEWS.includes(saved) ? saved : 'live';
+    return saved && VALID_VIEWS.includes(saved) ? saved : 'tracker';
   });
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   // Deep links from Teams alert cards (e.g. .../#/analytics) select the matching view.
   useEffect(() => {
@@ -156,6 +150,27 @@ export default function App() {
       sub.subscription.unsubscribe();
     };
   }, []);
+
+  // Close the header menu when clicking outside it or pressing Escape.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -359,9 +374,9 @@ export default function App() {
       // If OFS is unreachable, save with null active job
     }
 
-    let downtimeSnapshot: Awaited<ReturnType<typeof fetchDowntimeByDate>> = [];
+    let downtimeSnapshot: DowntimeEvent[] = [];
     try {
-      downtimeSnapshot = await fetchDowntimeByDate(data.date);
+      downtimeSnapshot = await fetchDowntimeForShift(shift, data.customHours, data.date);
     } catch {
       // If downtime fetch fails, save with empty snapshot
     }
@@ -406,27 +421,6 @@ export default function App() {
       return next;
     });
   }, [data.date, data.shift]);
-
-  // Analytics: open a saved record from the records list — loads it onto the
-  // monitoring board and switches to the Monitoring tab.
-  const handleOpenRecordFromAnalytics = useCallback(async (recordDate: string, shiftName: string) => {
-    const shift = SHIFT_LIST.includes(shiftName as Shift) ? (shiftName as Shift) : 'Custom';
-    const record = await loadMonitoringRecord(recordDate, shift);
-    if (!record) {
-      throw new Error(`No saved record found for ${shift} on ${recordDate}.`);
-    }
-    setData((prev) => {
-      const next = cloneData(prev);
-      next.date = recordDate;
-      next.shift = shift;
-      next.db[shift] = record.board_data;
-      next.notes[shift] = record.notes ?? '';
-      next.sku[shift] = record.sku ?? '';
-      next.db[shift].date = record.record_date;
-      return next;
-    });
-    setView('tracker');
-  }, []);
 
   const handleExportReport = useCallback(() => {
     const dateStr = data.date || '';
@@ -531,21 +525,8 @@ function epochToConsoleTime(
       throw new Error('Select a date first at the top of the monitoring table.');
     }
     const shift = data.shift;
-    const hours = getActiveHours(shift, data.customHours);
-    const shiftStartStr = hours[0]?.split(' - ')[0]?.trim();
-    const isOvernight = shiftStartStr ? timeStrHour(shiftStartStr) >= 12 : false;
 
-    const events = await fetchDowntimeByDate(date);
-    if (isOvernight) {
-      const nextDate = new Date(`${date}T00:00:00`);
-      nextDate.setDate(nextDate.getDate() + 1);
-      const ny = nextDate.getFullYear();
-      const nm = String(nextDate.getMonth() + 1).padStart(2, '0');
-      const nd = String(nextDate.getDate()).padStart(2, '0');
-      const nextEvents = await fetchDowntimeByDate(`${ny}-${nm}-${nd}`);
-      events.push(...nextEvents);
-      events.sort((a, b) => b.start_epoch - a.start_epoch);
-    }
+    const events = await fetchDowntimeForShift(shift, data.customHours, date);
     if (events.length === 0) {
       throw new Error(`No downtime events found in the database for ${date}.`);
     }
@@ -587,7 +568,7 @@ function epochToConsoleTime(
   }
 
   const currentUserId = session.user.id;
-  const allowedViews = profile ? (ROLE_ACCESS[profile.role] ?? ROLE_ACCESS.operator) : ROLE_ACCESS.operator;
+  const allowedViews = profile ? userAllowedViews(profile) : ROLE_ACCESS.operator;
   const effectiveView: View = allowedViews.includes(view) ? view : allowedViews[0]!;
 
   const ALL_NAV: { id: View; label: string; Icon: LucideIcon }[] = [
@@ -596,6 +577,7 @@ function epochToConsoleTime(
     { id: 'downtime', label: 'Downtime', Icon: TimerOff },
     { id: 'calculator', label: 'Calculator', Icon: Calculator },
     { id: 'analytics', label: 'Analytics', Icon: BarChart3 },
+    { id: 'saved-records', label: 'Saved Records', Icon: Database },
     { id: 'admin', label: 'Admin', Icon: Shield },
   ];
   const navItems = ALL_NAV.filter((n) => allowedViews.includes(n.id));
@@ -605,118 +587,67 @@ function epochToConsoleTime(
       <div className="app-bar">
         <div className="app-bar-inner">
           <span className="app-bar-title">Free-Flow Manufacturing<br />Krones Canning Line Console</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-            {profile && (
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#ffffff', background: 'rgba(255,255,255,0.18)', borderRadius: 999, padding: '5px 12px' }}>
-                {profile.display_name}
-              </span>
-            )}
+          <div className="app-bar-menu" ref={menuRef}>
             <button
               type="button"
-              onClick={handleSignOut}
-              aria-label="Sign out"
-              title="Sign out"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                border: '1px solid rgba(255,255,255,0.45)',
-                background: 'rgba(255,255,255,0.15)',
-                color: '#ffffff',
-                fontWeight: 700,
-                fontSize: 13,
-                borderRadius: 999,
-                padding: '6px 14px',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                transition: 'background-color 0.2s, transform 0.1s',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(255,255,255,0.28)'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(255,255,255,0.15)'; }}
+              className="app-bar-menu-btn"
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-label="Menu"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              title="Menu"
             >
-              <LogOut size={16} />
-              Logout
+              <MoreVertical size={20} />
             </button>
-            <button
-              type="button"
-              onClick={toggleFullscreen}
-              aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-              title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                border: '1px solid rgba(255,255,255,0.35)',
-                background: 'rgba(255,255,255,0.15)',
-                color: '#ffffff',
-                width: 34,
-                height: 34,
-                borderRadius: 999,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                transition: 'background-color 0.2s, transform 0.1s',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(255,255,255,0.28)'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(255,255,255,0.15)'; }}
-            >
-              {isFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
-            </button>
-            <button
-              type="button"
-              onClick={toggleTheme}
-              aria-label="Toggle dark mode"
-              title="Toggle dark / light mode"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                border: '1px solid rgba(255,255,255,0.35)',
-                background: 'rgba(255,255,255,0.15)',
-                color: '#ffffff',
-                width: 34,
-                height: 34,
-                borderRadius: 999,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                transition: 'background-color 0.2s, transform 0.1s',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(255,255,255,0.28)'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(255,255,255,0.15)'; }}
-            >
-              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
-            </button>
-            <div className="app-bar-actions">
-              <button
-                type="button"
-                className="app-bar-settings-btn"
-                onClick={() => setSettingsOpen(true)}
-                aria-label="Settings"
-                title="Settings"
-              >
-                <Settings size={22} />
-              </button>
-              {profile?.role === 'admin' && (
+            {menuOpen && (
+              <div className="app-bar-dropdown" role="menu">
+                {profile && (
+                  <div className="app-bar-dropdown-user">
+                    <span className="app-bar-dropdown-user-name">{profile.display_name}</span>
+                    <span className="app-bar-dropdown-user-role">Signed in</span>
+                  </div>
+                )}
                 <button
                   type="button"
-                  className="app-bar-settings-btn"
-                  onClick={handleSync}
-                  aria-label="Sync data from OFS"
-                  title="Sync data from OFS"
-                  disabled={syncing}
+                  role="menuitem"
+                  className="app-bar-dropdown-item"
+                  onClick={toggleTheme}
                 >
-                  {syncing ? <Loader2 size={22} className="animate-spin" /> : <Database size={22} />}
+                  {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+                  <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
                 </button>
-              )}
-            </div>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="app-bar-dropdown-item"
+                  onClick={toggleFullscreen}
+                >
+                  {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                  <span>{isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="app-bar-dropdown-item"
+                  onClick={() => { setSettingsOpen(true); setMenuOpen(false); }}
+                >
+                  <Settings size={16} />
+                  <span>Settings</span>
+                </button>
+                <div className="app-bar-dropdown-divider" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="app-bar-dropdown-item app-bar-dropdown-item-danger"
+                  onClick={handleSignOut}
+                >
+                  <LogOut size={16} />
+                  <span>Logout</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
-
-        {syncMessage && (
-          <div className="app-bar-sync-msg" style={{ color: '#d1fae5' }}>{syncMessage}</div>
-        )}
-        {syncError && (
-          <div className="app-bar-sync-msg" style={{ color: '#fecaca' }}>{syncError}</div>
-        )}
 
         <div className="app-bar-controls no-print">
           <div className="app-bar-ctrl-group">
@@ -798,7 +729,6 @@ function epochToConsoleTime(
             currentShift={data.shift}
             customHours={data.customHours}
             date={data.date}
-            isAdmin={profile?.role === 'admin'}
           />
         ) : effectiveView === 'downtime' ? (
           <DowntimeHistory
@@ -807,9 +737,17 @@ function epochToConsoleTime(
             customHours={data.customHours}
           />
         ) : effectiveView === 'analytics' ? (
-          <AnalyticsView onOpenRecord={handleOpenRecordFromAnalytics} syncTick={syncTick} />
+          <AnalyticsView syncTick={syncTick} />
+        ) : effectiveView === 'saved-records' ? (
+          <SavedRecordsView />
         ) : effectiveView === 'admin' ? (
-          <AdminView currentUserId={currentUserId} />
+          <AdminView
+            currentUserId={currentUserId}
+            syncing={syncing}
+            syncMessage={syncMessage}
+            syncError={syncError}
+            onSync={handleSync}
+          />
         ) : (
           <MonitoringView
             db={data.db}
@@ -834,7 +772,7 @@ function epochToConsoleTime(
         )}
 
         <div className="footer">
-          Web Apps Console v3.00 - Created by <strong>Kelvin George</strong>
+          Web Apps Console v3.01 - Created by <strong>Kelvin George</strong>
         </div>
       </div>
 
@@ -854,7 +792,7 @@ function epochToConsoleTime(
         ))}
       </nav>
 
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} isAdmin={profile?.role === 'admin'} kiosk={kiosk} onKioskChange={setKiosk} />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} kiosk={kiosk} onKioskChange={setKiosk} />
     </div>
   );
 }

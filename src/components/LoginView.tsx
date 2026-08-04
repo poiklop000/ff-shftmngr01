@@ -30,36 +30,18 @@ export function LoginView({ onSuccess }: LoginViewProps) {
   };
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'linear-gradient(160deg, #0d47a1 0%, #1e3a8a 60%, #172554 100%)',
-        padding: 16,
-        boxSizing: 'border-box',
-      }}
-    >
+    <div className="login-backdrop">
       <div
-        className="card"
-        style={{
-          width: '100%',
-          maxWidth: 380,
-          padding: 28,
-          background: '#ffffff',
-          border: '1px solid #e2e8f0',
-          borderRadius: 14,
-        }}
+        className="card login-card"
       >
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
-          <div style={{ fontWeight: 800, fontSize: 18, color: '#0f172a', lineHeight: 1.3 }}>
+          <div style={{ fontWeight: 800, fontSize: 18, color: 'var(--app-fg)', lineHeight: 1.3 }}>
             Free-Flow Manufacturing
           </div>
-          <div style={{ fontWeight: 700, fontSize: 14, color: '#0d47a1', marginTop: 2 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--blue-tag-text)', marginTop: 2 }}>
             Krones Canning Line Console
           </div>
-          <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>Sign in to continue</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>Sign in to continue</div>
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -95,9 +77,9 @@ export function LoginView({ onSuccess }: LoginViewProps) {
             <div
               style={{
                 fontSize: 13,
-                color: '#b91c1c',
-                background: '#fef2f2',
-                border: '1px solid #fecaca',
+                color: 'var(--danger-text)',
+                background: 'var(--danger-bg)',
+                border: '1px solid var(--danger-border)',
                 borderRadius: 8,
                 padding: '8px 10px',
                 fontWeight: 600,
@@ -118,7 +100,7 @@ export function LoginView({ onSuccess }: LoginViewProps) {
           </button>
         </form>
 
-        <div style={{ textAlign: 'center', fontSize: 11, color: '#94a3b8', marginTop: 16 }}>
+        <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--text-muted)', marginTop: 16 }}>
           Accounts are assigned by your administrator.
         </div>
       </div>

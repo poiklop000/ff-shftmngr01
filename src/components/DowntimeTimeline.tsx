@@ -57,9 +57,10 @@ function computeNowPct(
   if (dateMatch) {
     const consoleDate = dateMatch[1]!;
     if (consoleDate === shiftDate) {
-      if (isOvernight && minOfDay < shiftStartMin) {
-        shiftMin = minOfDay + 1440;
-      }
+      // Time on the shift's own start date that falls before shiftStart means
+      // the shift has not begun yet (overnight shifts start in the evening),
+      // so there is no "now" inside the window. Keep shiftMin = minOfDay and
+      // let the bounds check below return null.
     } else if (isOvernight) {
       const [sy, sm, sd] = shiftDate.split('-').map(Number);
       const [ey, em, ed] = consoleDate.split('-').map(Number);
@@ -80,6 +81,26 @@ function computeNowPct(
 
   if (shiftMin < shiftStartMin || shiftMin > shiftEndMin) return null;
   return ((shiftMin - shiftStartMin) / totalMin) * 100;
+}
+
+type ShiftTimeStatus = 'not-started' | 'in-progress' | 'ended' | 'unknown';
+
+// Classifies where "now" (the live console time) sits relative to the selected
+// shift window. A shift whose date is in the future — or whose start time on
+// its own date hasn't arrived yet (e.g. Night 18:00 viewed at 05:08) — is
+// "not-started": no events can have occurred in it, so nothing should render.
+function getShiftTimeStatus(
+  consoleTime: string,
+  shiftDate: string,
+  shiftStartMin: number,
+  shiftEndMin: number,
+): ShiftTimeStatus {
+  if (!consoleTime || consoleTime === '-') return 'unknown';
+  if (!/^\d{4}-\d{2}-\d{2}/.test(consoleTime) || !/\d{1,2}:\d{2}/.test(consoleTime)) return 'unknown';
+  const nowShiftMin = consoleTimeToShiftMinutes(consoleTime, shiftDate);
+  if (nowShiftMin < shiftStartMin) return 'not-started';
+  if (nowShiftMin > shiftEndMin) return 'ended';
+  return 'in-progress';
 }
 
 interface TimelineBlock {
@@ -113,7 +134,7 @@ export function DowntimeTimeline({
   consoleTime,
   loading,
 }: DowntimeTimelineProps) {
-  const { blocks, hourMarks, nowPct, runWidthPct, totalDowntimeMin, eventCount } = useMemo(() => {
+  const { blocks, hourMarks, nowPct, runWidthPct, totalDowntimeMin, eventCount, status } = useMemo(() => {
     const hours = getActiveHours(currentShift, customHours);
     if (hours.length === 0 || !date) {
       return {
@@ -123,6 +144,7 @@ export function DowntimeTimeline({
         runWidthPct: 100,
         totalDowntimeMin: 0,
         eventCount: 0,
+        status: 'unknown' as ShiftTimeStatus,
       };
     }
 
@@ -133,6 +155,8 @@ export function DowntimeTimeline({
     const shiftEndMin = endMinRaw <= shiftStartMin ? endMinRaw + 1440 : endMinRaw;
     const totalMin = shiftEndMin - shiftStartMin;
 
+    const status = getShiftTimeStatus(consoleTime, date, shiftStartMin, shiftEndMin);
+
     const nowPct = computeNowPct(consoleTime, date, shiftStartMin, shiftEndMin, totalMin);
     let nowShiftMin: number | null = null;
     if (nowPct !== null) {
@@ -141,32 +165,36 @@ export function DowntimeTimeline({
 
     const blocks: TimelineBlock[] = [];
     let totalDowntimeMin = 0;
-    for (const evt of events) {
-      if (!evt.start_text) continue;
-      const startMin = consoleTimeToShiftMinutes(evt.start_text, date);
-      const endMin = evt.resolved
-        ? startMin + (evt.duration_ms ?? 0) / 60000
-        : nowShiftMin ?? shiftEndMin;
+    // A shift that hasn't started yet has no events of its own; events fetched
+    // for its date are leftovers from the previous shift's tail, so show none.
+    if (status !== 'not-started') {
+      for (const evt of events) {
+        if (!evt.start_text) continue;
+        const startMin = consoleTimeToShiftMinutes(evt.start_text, date);
+        const endMin = evt.resolved
+          ? startMin + (evt.duration_ms ?? 0) / 60000
+          : nowShiftMin ?? shiftEndMin;
 
-      if (endMin <= shiftStartMin || startMin >= shiftEndMin) continue;
+        if (endMin <= shiftStartMin || startMin >= shiftEndMin) continue;
 
-      const clampedStart = Math.max(startMin, shiftStartMin);
-      const clampedEnd = Math.min(endMin, shiftEndMin);
-      const durMin = clampedEnd - clampedStart;
-      if (durMin <= 0) continue;
+        const clampedStart = Math.max(startMin, shiftStartMin);
+        const clampedEnd = Math.min(endMin, shiftEndMin);
+        const durMin = clampedEnd - clampedStart;
+        if (durMin <= 0) continue;
 
-      const leftPct = ((clampedStart - shiftStartMin) / totalMin) * 100;
-      const widthPct = (durMin / totalMin) * 100;
-      const reason = evt.reason ?? evt.category ?? 'Downtime';
+        const leftPct = ((clampedStart - shiftStartMin) / totalMin) * 100;
+        const widthPct = (durMin / totalMin) * 100;
+        const reason = evt.reason ?? evt.category ?? 'Downtime';
 
-      blocks.push({
-        leftPct,
-        widthPct: Math.max(widthPct, 0.3),
-        color: getTypeColor(evt.downtime_type),
-        label: reason,
-        durationLabel: formatDurationShort(durMin),
-      });
-      totalDowntimeMin += durMin;
+        blocks.push({
+          leftPct,
+          widthPct: Math.max(widthPct, 0.3),
+          color: getTypeColor(evt.downtime_type),
+          label: reason,
+          durationLabel: formatDurationShort(durMin),
+        });
+        totalDowntimeMin += durMin;
+      }
     }
 
     const hourMarks: HourMark[] = [];
@@ -180,9 +208,9 @@ export function DowntimeTimeline({
       });
     }
 
-    const runWidthPct = nowPct !== null ? nowPct : 100;
+    const runWidthPct = status === 'not-started' ? 0 : nowPct !== null ? nowPct : 100;
 
-    return { blocks, hourMarks, nowPct, runWidthPct, totalDowntimeMin, eventCount: blocks.length };
+    return { blocks, hourMarks, nowPct, runWidthPct, totalDowntimeMin, eventCount: blocks.length, status };
   }, [events, currentShift, customHours, date, consoleTime]);
 
   return (
@@ -266,7 +294,9 @@ export function DowntimeTimeline({
 
           {eventCount === 0 && (
             <p className="text-center text-[11px] text-slate-400 font-medium mt-2 m-0">
-              No downtime events this shift — clean run.
+              {status === 'not-started'
+                ? "Shift hasn't started yet — no events to display."
+                : 'No downtime events this shift — clean run.'}
             </p>
           )}
         </>

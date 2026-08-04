@@ -8,11 +8,16 @@
 //
 // Request body (POST):  { action, ... }
 //   list                      -> GET also supported
-//   create      { username, password, displayName, role }
+//   create      { username, password, displayName, role, pageAccess? }
 //   reset       { userId, password }
 //   set-active  { userId, isActive }
-//   update      { userId, displayName?, role? }
+//   update      { userId, displayName?, role?, pageAccess? }
 //   delete      { userId }
+//
+// pageAccess is a per-user override for which pages the user can open
+// (profiles.page_access, nullable). A null/empty value means the user's role
+// decides their pages. The Admin page itself is not a valid value here — it is
+// always restricted to admins.
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -26,8 +31,26 @@ const USERNAME_RE = /^[A-Za-z0-9_.-]{1,50}$/;
 const VALID_ROLES = ["admin", "manager", "team_lead", "operator"] as const;
 type Role = (typeof VALID_ROLES)[number];
 
+// Pages a profile can be granted. The Admin page is intentionally excluded so
+// it always stays admin-only.
+const VALID_PAGES = ["calculator", "tracker", "live", "downtime", "analytics", "saved-records"] as const;
+
 function normalizeRole(value: unknown): Role {
   return VALID_ROLES.includes(value as Role) ? (value as Role) : "operator";
+}
+
+function normalizePageAccess(value: unknown): string[] | null {
+  if (value === null || value === undefined) return null;
+  if (!Array.isArray(value)) return null;
+  const pages = [...new Set(value.map((v) => String(v)))];
+  const allowed = pages.filter((p) => (VALID_PAGES as readonly string[]).includes(p));
+  return allowed.length > 0 ? allowed : null;
+}
+
+// Tolerates the profiles.page_access migration not being applied yet, so the
+// function keeps working (and nobody loses access) before it runs.
+function isMissingPageAccessError(error: { message: string } | null): boolean {
+  return !!error && /page_access[\s\S]*does not exist/i.test(error.message);
 }
 
 function json(body: unknown, status = 200): Response {
@@ -89,8 +112,16 @@ Deno.serve(async (req: Request) => {
     if (req.method === "GET" || action === "list") {
       const { data: users, error } = await admin
         .from("profiles")
-        .select("user_id, username, display_name, role, is_active, created_at")
+        .select("user_id, username, display_name, role, is_active, page_access, created_at")
         .order("created_at", { ascending: true });
+      if (isMissingPageAccessError(error)) {
+        const fallback = await admin
+          .from("profiles")
+          .select("user_id, username, display_name, role, is_active, created_at")
+          .order("created_at", { ascending: true });
+        if (fallback.error) return json({ error: fallback.error.message }, 400);
+        return json({ users: fallback.data });
+      }
       if (error) return json({ error: error.message }, 400);
       return json({ users });
     }
@@ -98,6 +129,7 @@ Deno.serve(async (req: Request) => {
     if (action === "create") {
       const { username, password, displayName } = validateCredentials(body.username ?? "", body.password ?? "", body.displayName ?? "");
       const role = normalizeRole(body.role);
+      const pageAccess = normalizePageAccess(body.pageAccess);
       const email = `${username.toLowerCase()}${APP_DOMAIN}`;
 
       const { data: created, error: cErr } = await admin.auth.admin.createUser({
@@ -109,18 +141,25 @@ Deno.serve(async (req: Request) => {
       if (cErr) return json({ error: cErr.message }, 400);
       if (!created?.user) return json({ error: "Failed to create user" }, 400);
 
-      const { error: pErr } = await admin.from("profiles").insert({
+      const insertRow = {
         user_id: created.user.id,
         username,
         display_name: displayName,
         role,
         is_active: true,
-      });
+        page_access: pageAccess,
+      };
+      let { error: pErr } = await admin.from("profiles").insert(insertRow);
+      if (isMissingPageAccessError(pErr)) {
+        const core = { ...insertRow };
+        delete core.page_access;
+        ({ error: pErr } = await admin.from("profiles").insert(core));
+      }
       if (pErr) {
         await admin.auth.admin.deleteUser(created.user.id).catch(() => {});
         return json({ error: pErr.message }, 400);
       }
-      return json({ user: { user_id: created.user.id, username, display_name: displayName, role, is_active: true } });
+      return json({ user: { user_id: created.user.id, username, display_name: displayName, role, is_active: true, page_access: pageAccess } });
     }
 
     if (action === "reset") {
@@ -145,15 +184,23 @@ Deno.serve(async (req: Request) => {
     if (action === "update") {
       const targetId = String(body.userId ?? "");
       if (!targetId) return json({ error: "User ID is required" }, 400);
-      const patch: Record<string, string> = {};
+      const patch: Record<string, string | string[] | null> = {};
       if (body.displayName !== undefined) {
         const dn = String(body.displayName).trim();
         if (!dn || dn.length > 100) return json({ error: "Display name is required (max 100 chars)" }, 400);
         patch.display_name = dn;
       }
       if (body.role !== undefined) patch.role = normalizeRole(body.role);
+      if (body.pageAccess !== undefined) patch.page_access = normalizePageAccess(body.pageAccess);
       if (Object.keys(patch).length === 0) return json({ error: "Nothing to update" }, 400);
       const { error } = await admin.from("profiles").update(patch).eq("user_id", targetId);
+      if (error && isMissingPageAccessError(error) && "page_access" in patch) {
+        const core = { ...patch };
+        delete core.page_access;
+        const retry = await admin.from("profiles").update(core).eq("user_id", targetId);
+        if (retry.error) return json({ error: retry.error.message }, 400);
+        return json({ ok: true });
+      }
       if (error) return json({ error: error.message }, 400);
       return json({ ok: true });
     }

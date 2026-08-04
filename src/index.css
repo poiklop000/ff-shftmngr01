@@ -32,32 +32,85 @@ html {
   margin: 0 auto;
 }
 .app-bar-title { display: block; padding: 0 92px; }
-.app-bar-actions {
+.app-bar-menu {
   position: absolute;
   right: 0;
   top: 50%;
   transform: translateY(-50%);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
-.app-bar-settings-btn {
-  position: static;
-  background: rgba(255, 255, 255, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 50%;
-  width: 40px;
-  height: 40px;
-  display: flex;
+.app-bar-menu-btn {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
   cursor: pointer;
-  transition: background-color 0.2s, transform 0.15s;
+  font-family: inherit;
+  transition: background-color 0.2s, transform 0.1s;
 }
-.app-bar-settings-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.28); transform: scale(1.05); }
-.app-bar-settings-btn:active:not(:disabled) { transform: scale(0.95); }
-.app-bar-settings-btn:disabled { opacity: 0.6; cursor: default; }
+.app-bar-menu-btn:hover:not(:disabled) { background-color: rgba(255, 255, 255, 0.28); transform: scale(1.05); }
+.app-bar-menu-btn:active:not(:disabled) { transform: scale(0.95); }
+.app-bar-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 200;
+  min-width: 230px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.25), 0 4px 12px rgba(15, 23, 42, 0.12);
+  padding: 6px;
+  animation: modal-slide-up 0.18s ease-out;
+}
+.app-bar-dropdown-user {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px 12px 12px;
+  border-bottom: 1px solid var(--card-border);
+  margin-bottom: 6px;
+}
+.app-bar-dropdown-user-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--app-fg);
+}
+.app-bar-dropdown-user-role {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.app-bar-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background: none;
+  color: var(--app-fg);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.app-bar-dropdown-item:hover { background-color: var(--track-bg); }
+.app-bar-dropdown-item-danger { color: var(--danger-text); }
+.app-bar-dropdown-divider {
+  height: 1px;
+  background: var(--card-border);
+  margin: 6px 4px;
+}
 .app-bar-sync-msg {
   max-width: 1200px;
   margin: 10px auto 0 auto;
@@ -230,6 +283,12 @@ html {
 .modal-close-btn:hover { background: #e2e8f0; color: #0f172a; }
 .modal-loading { color: #64748b; font-size: 13px; text-align: center; padding: 20px 0; }
 .report-modal { max-width: 940px; }
+@media (min-width: 1280px) {
+  .modal-card.report-modal {
+    max-width: 1440px;
+    max-height: 96vh;
+  }
+}
 .report-table-scroll { overflow-x: auto; }
 
 /* ---- Saved report: mirrors the @media print stylesheet exactly ---- */
@@ -436,6 +495,24 @@ html {
 }
 .card:hover {
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.1), 0 2px 6px rgba(15, 23, 42, 0.06);
+}
+.login-backdrop {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(160deg, #0d47a1 0%, #1e3a8a 60%, #172554 100%);
+  padding: 16px;
+  box-sizing: border-box;
+}
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  padding: 28px;
+  margin: 0;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
 }
 .card-blue { background-color: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
 .card-green { background-color: #f0fdf4; border-color: #bbf7d0; color: #166534; }
@@ -935,6 +1012,33 @@ tbody tr:hover { background-color: #eff6ff; }
     white-space: pre-wrap !important;
     line-height: 1.35 !important;
   }
+
+  /* ---- Print: saved record report (Report button on the Saved Records page) ----
+     The report is rendered in a .print-only container (hidden on screen) while
+     the Report flow is active, so printing shows only the report. If the user
+     prints while a record modal is open, the modal chrome is stripped too. */
+  body.printing-saved-report .saved-records-list { display: none !important; }
+  .modal-overlay {
+    position: static !important;
+    inset: auto !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    padding: 0 !important;
+    display: block !important;
+    animation: none !important;
+  }
+  .modal-card.report-modal {
+    max-width: 100% !important;
+    max-height: none !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
+    animation: none !important;
+  }
+  .modal-card.report-modal .modal-header { display: none !important; }
+  .saved-records-list:has(~ .modal-overlay) { display: none !important; }
 }
 
 /* =========================================================
@@ -1028,6 +1132,20 @@ html[data-theme='dark'] body {
   background-color: #0b1220;
 }
 
+/* App bar: tone the bright blue header down to a deep navy that matches the
+   dark palette (#0b1220 page bg, #111a2e cards) instead of glowing blue. */
+html[data-theme='dark'] .app-bar {
+  background: linear-gradient(135deg, #0a1833 0%, #0d2045 55%, #102b58 100%);
+  border-bottom-color: #a16207;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+
+/* Login page: deepen the backdrop slightly so the card reads as the
+   brightest surface in dark mode. */
+html[data-theme='dark'] .login-backdrop {
+  background: linear-gradient(160deg, #0a3a8f 0%, #142a5c 55%, #0c1830 100%);
+}
+
 /* ---- Surfaces ---- */
 html[data-theme='dark'] .card {
   background-color: var(--card-bg);
@@ -1110,6 +1228,14 @@ html[data-theme='dark'] .form-control {
   color: #e2e8f0;
 }
 html[data-theme='dark'] .form-control:focus {
+  border-color: #3b82f6;
+}
+html[data-theme='dark'] .interval-input {
+  background-color: #1e293b;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+html[data-theme='dark'] .interval-input:focus {
   border-color: #3b82f6;
 }
 html[data-theme='dark'] .table-input,

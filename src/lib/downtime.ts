@@ -1,5 +1,6 @@
 import { fetchExpressSpans, type ExpressSpan } from '@/lib/ofs';
 import { supabase } from '@/lib/supabase';
+import { getActiveHours, type Shift } from '@/types';
 import { withTimeout } from '@/lib/ui';
 
 const DB_TIMEOUT_MS = 15000;
@@ -148,6 +149,18 @@ function spanToEvent(span: ExpressSpan): DowntimeEvent {
   };
 }
 
+/**
+ * Returns the end of a downtime event as an OFS console-time string in the
+ * same "YYYY-MM-DD HH:MM:SS.mmm" format as `start_text`, or null when the
+ * event is still running. Used to detect events that started before the
+ * current shift window but overlap into it (e.g. a planned stop that began
+ * at 04:54 and continues past the 06:00 shift change).
+ */
+export function downtimeEventEndText(e: DowntimeEvent): string | null {
+  if (!e.resolved || e.end_epoch == null) return null;
+  return formatEpochConsole(e.end_epoch);
+}
+
 // Convert a date string (YYYY-MM-DD) to the start/end epoch range in the
 // OFS console timezone (Pacific/Auckland). We build the bounds from the
 // date string directly and convert to epoch via Intl, so the browser's
@@ -241,6 +254,45 @@ export async function fetchDowntimeBetween(
   endAt: string,
 ): Promise<DowntimeEvent[]> {
   return fetchDowntimeBetweenEpochs(localDateTimeToEpoch(startAt), localDateTimeToEpoch(endAt));
+}
+
+/**
+ * Returns the "YYYY-MM-DD" string for the day after the given date.
+ */
+export function nextDateStr(date: string): string {
+  const d = new Date(`${date}T00:00:00`);
+  d.setDate(d.getDate() + 1);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Fetches downtime events covering the full window of a shift. Overnight
+ * shifts (start hour >= 12, e.g. Night 18:00-06:00) cross midnight, so the
+ * following calendar day is fetched too — otherwise events between 00:00 and
+ * the end of the shift are missing. Returns events sorted newest-first.
+ *
+ * Shared by the Monitoring timeline, Import Downtime, and the saved-record
+ * snapshot so all three views capture the same set of events.
+ */
+export async function fetchDowntimeForShift(
+  shift: Shift,
+  customHours: string[],
+  shiftDate: string,
+): Promise<DowntimeEvent[]> {
+  const hours = getActiveHours(shift, customHours);
+  const startStr = hours[0]?.split(' - ')[0]?.trim();
+  const isOvernight = startStr ? parseInt(startStr.split(':')[0] ?? '0', 10) >= 12 : false;
+
+  const events = await fetchDowntimeByDate(shiftDate);
+  if (isOvernight) {
+    const next = await fetchDowntimeByDate(nextDateStr(shiftDate));
+    events.push(...next);
+    events.sort((a, b) => b.start_epoch - a.start_epoch);
+  }
+  return events;
 }
 
 async function fetchDowntimeBetweenEpochs(

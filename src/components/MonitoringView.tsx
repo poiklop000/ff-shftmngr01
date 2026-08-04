@@ -12,7 +12,7 @@ import {
 import { ShiftTable } from '@/components/ShiftTable';
 import { DowntimeTimeline } from '@/components/DowntimeTimeline';
 import { PageHelp } from '@/components/PageHelp';
-import { fetchDowntimeByDate, type DowntimeEvent } from '@/lib/downtime';
+import { fetchDowntimeForShift, downtimeEventEndText, type DowntimeEvent } from '@/lib/downtime';
 import { fetchOfsStatus, type OfsLiveStatus } from '@/lib/ofs';
 import { fetchJobsForShift } from '@/lib/jobSnapshots';
 import { useAutoGrow } from '@/lib/ui';
@@ -79,20 +79,7 @@ export function MonitoringView({
     if (!shiftDate) { setTimelineEvents([]); return; }
     setTimelineLoading(true);
     try {
-      const hours = getActiveHours(shift, customHrs);
-      const startStr = hours[0]?.split(' - ')[0]?.trim();
-      const isOvernight = startStr ? parseInt(startStr.split(':')[0] ?? '0', 10) >= 12 : false;
-      const events = await fetchDowntimeByDate(shiftDate);
-      if (isOvernight) {
-        const d = new Date(`${shiftDate}T00:00:00`);
-        d.setDate(d.getDate() + 1);
-        const ny = d.getFullYear();
-        const nm = String(d.getMonth() + 1).padStart(2, '0');
-        const nd = String(d.getDate()).padStart(2, '0');
-        const next = await fetchDowntimeByDate(`${ny}-${nm}-${nd}`);
-        events.push(...next);
-        events.sort((a, b) => b.start_epoch - a.start_epoch);
-      }
+      const events = await fetchDowntimeForShift(shift, customHrs, shiftDate);
       setTimelineEvents(events);
     } catch {
       setTimelineEvents([]);
@@ -149,7 +136,7 @@ export function MonitoringView({
   }, []);
 
   const shiftTimelineEvents = useMemo(
-    () => filterByShiftWindow(timelineEvents, currentShift, activeHours, date, (e) => e.start_text),
+    () => filterByShiftWindow(timelineEvents, currentShift, activeHours, date, (e) => e.start_text, undefined, downtimeEventEndText),
     [timelineEvents, currentShift, activeHours, date],
   );
 

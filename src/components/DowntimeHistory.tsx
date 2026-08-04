@@ -14,6 +14,7 @@ import {
   formatDuration,
   formatEventDate,
   formatEventTime,
+  downtimeEventEndText,
   type DowntimeComment,
   type DowntimeEvent,
 } from '@/lib/downtime';
@@ -93,7 +94,7 @@ export function DowntimeHistory({
   }, [loadHistory, activeDate]);
 
   const shiftEvents = useMemo(
-    () => filterByShiftWindow(events, currentShift, customHours, activeDate, (e) => e.start_text),
+    () => filterByShiftWindow(events, currentShift, customHours, activeDate, (e) => e.start_text, undefined, downtimeEventEndText),
     [events, currentShift, customHours, activeDate],
   );
 

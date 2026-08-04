@@ -458,6 +458,11 @@ export function computeDowntimeLogs(
  *
  * Reused by LiveLineStatus (Production Counter Summary) and DowntimeHistory so
  * both views stay in sync with the date + shift selected on the monitoring page.
+ *
+ * When `endTimeKey` is provided (e.g. the event's console end time), events
+ * that started before the shift window are still kept when they are ongoing or
+ * overlap into the window — a planned stop that began at 04:54 must keep
+ * showing after the 06:00 shift change instead of disappearing.
  */
 export function filterByShiftWindow<T>(
   entries: T[],
@@ -466,6 +471,7 @@ export function filterByShiftWindow<T>(
   shiftDate: string,
   consoleTimeKey: (e: T) => string | null | undefined,
   hourKey?: (e: T) => string | null | undefined,
+  endTimeKey?: (e: T) => string | null | undefined,
 ): T[] {
   const hours = getActiveHours(shift, customHours);
   if (hours.length === 0 || !shiftDate) return [];
@@ -478,7 +484,13 @@ export function filterByShiftWindow<T>(
     const consoleTime = consoleTimeKey(e);
     if (consoleTime) {
       const min = consoleTimeToShiftMinutes(consoleTime, shiftDate);
-      return min >= shiftStartMin && min < shiftEndMin;
+      if (min >= shiftStartMin && min < shiftEndMin) return true;
+      if (endTimeKey && min < shiftStartMin) {
+        const endStr = endTimeKey(e);
+        if (!endStr) return true;
+        return consoleTimeToShiftMinutes(endStr, shiftDate) > shiftStartMin;
+      }
+      return false;
     }
     if (hourKey) {
       const h = hourKey(e);

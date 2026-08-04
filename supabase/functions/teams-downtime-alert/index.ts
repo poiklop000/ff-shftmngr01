@@ -75,39 +75,28 @@ function formatEpochLocal(epoch: number): string {
 interface JobContext {
   product: string | null;
   orderName: string | null;
-  ratePerHour: number | null;
-}
-
-function formatNumber(n: number): string {
-  return n.toLocaleString("en-NZ");
-}
-
-// Estimated cans not produced while the line is down: duration x rated speed.
-function computeCansLost(durationMs: number, ratePerHour: number): number {
-  return Math.round((durationMs / 3_600_000) * ratePerHour);
 }
 
 // Find the active job snapshot captured just before the event started, so
-// alerts can show which product was running and the rated line speed.
+// alerts can show which product was running.
 async function findJobContext(
   supabase: ReturnType<typeof getSupabase>,
   startEpoch: number,
 ): Promise<JobContext | null> {
   const { data } = await supabase
     .from("job_snapshots")
-    .select("product_name, order_name, sku, rated_speed")
+    .select("product_name, order_name, sku")
     .not("job_id", "is", null)
     .lte("capture_time", new Date(startEpoch).toISOString())
     .order("capture_time", { ascending: false })
     .limit(1);
   const row = data?.[0] as
-    | { product_name?: string | null; order_name?: string | null; rated_speed?: number | null }
+    | { product_name?: string | null; order_name?: string | null }
     | undefined;
   if (!row) return null;
   return {
     product: row.product_name ?? null,
     orderName: row.order_name ?? null,
-    ratePerHour: typeof row.rated_speed === "number" ? row.rated_speed : null,
   };
 }
 
@@ -115,12 +104,6 @@ function productFact(ctx: JobContext | null): { title: string; value: string } |
   if (ctx?.orderName) return { title: "Product:", value: ctx.orderName };
   if (ctx?.product) return { title: "Product:", value: ctx.product };
   return null;
-}
-
-function impactFact(durationMs: number, ctx: JobContext | null, ratePerHour: number | null): { title: string; value: string } | null {
-  const rate = ctx?.ratePerHour ?? ratePerHour;
-  if (!rate || rate <= 0) return null;
-  return { title: "Est. cans lost:", value: formatNumber(computeCansLost(durationMs, rate)) };
 }
 
 // Color-code alerts by downtime type so they are visually distinguishable in Teams.
@@ -194,7 +177,6 @@ function buildTestMessage(): Record<string, unknown> {
 function buildOccurredMessage(
   evt: DowntimeRow,
   ctx: JobContext | null,
-  ratePerHour: number | null,
 ): Record<string, unknown> {
   const nowMs = Date.now();
   const durationMs = evt.duration_ms ?? (nowMs - evt.start_epoch);
@@ -212,8 +194,6 @@ function buildOccurredMessage(
   const product = productFact(ctx);
   if (product) facts.push(product);
   facts.push({ title: "Duration so far:", value: formatDuration(durationMs) });
-  const impact = impactFact(durationMs, ctx, ratePerHour);
-  if (impact) facts.push(impact);
   facts.push({ title: "Started:", value: startTime });
   if (evt.crew_name) facts.push({ title: "Crew:", value: evt.crew_name });
 
@@ -235,7 +215,6 @@ function buildOccurredMessage(
 function buildResolvedMessage(
   evt: DowntimeRow,
   ctx: JobContext | null,
-  ratePerHour: number | null,
 ): Record<string, unknown> {
   const durationMs = evt.duration_ms ?? (evt.end_epoch ? evt.end_epoch - evt.start_epoch : 0);
   const lineName = evt.console_name ?? "Production Line";
@@ -253,8 +232,6 @@ function buildResolvedMessage(
   const product = productFact(ctx);
   if (product) facts.push(product);
   facts.push({ title: "Total duration:", value: formatDuration(durationMs) });
-  const impact = impactFact(durationMs, ctx, ratePerHour);
-  if (impact) facts.push(impact);
   facts.push({ title: "Started:", value: startTime });
   facts.push({ title: "Ended:", value: endTime });
   if (evt.crew_name) facts.push({ title: "Crew:", value: evt.crew_name });
@@ -277,7 +254,6 @@ function buildResolvedMessage(
 function buildEscalationMessage(
   evt: DowntimeRow,
   ctx: JobContext | null,
-  ratePerHour: number | null,
   thresholdMinutes: number,
 ): Record<string, unknown> {
   const nowMs = Date.now();
@@ -296,8 +272,6 @@ function buildEscalationMessage(
   const product = productFact(ctx);
   if (product) facts.push(product);
   facts.push({ title: "Duration so far:", value: formatDuration(durationMs) });
-  const impact = impactFact(durationMs, ctx, ratePerHour);
-  if (impact) facts.push(impact);
   facts.push({ title: "Started:", value: startTime });
   if (evt.crew_name) facts.push({ title: "Crew:", value: evt.crew_name });
 
@@ -457,16 +431,6 @@ Deno.serve(async (req: Request) => {
       return levels.length > 0 ? [...levels].sort((a, b) => a - b) : [30, 60, 120];
     })();
 
-    const { data: defaultRateRow } = await supabase
-      .from("app_config")
-      .select("value")
-      .eq("key", "teams_default_cans_per_hour")
-      .maybeSingle();
-    const defaultRatePerHour = (() => {
-      const n = Number(defaultRateRow?.value);
-      return Number.isFinite(n) && n > 0 ? n : 24000;
-    })();
-
     if (!webhookUrl || !enabled) {
       console.log(
         `[teams-downtime-alert] ${new Date().toISOString()} skipped — webhook: ${!!webhookUrl}, enabled: ${enabled}`,
@@ -540,9 +504,8 @@ Deno.serve(async (req: Request) => {
         ? (evt.duration_ms ?? (evt.end_epoch ? evt.end_epoch - evt.start_epoch : 0))
         : (nowMs - evt.start_epoch);
 
-      // Job context (product + rated speed) + fallback can rate
+      // Job context (product for the alert) 
       const ctx = await findJobContext(supabase, evt.start_epoch);
-      const ratePerHour = ctx?.ratePerHour ?? defaultRatePerHour;
       const product = ctx?.orderName ?? ctx?.product;
 
       if (needsOccurred) {
@@ -550,7 +513,7 @@ Deno.serve(async (req: Request) => {
           skippedCount++;
           continue;
         }
-        const payload = buildOccurredMessage(evt, ctx, ratePerHour);
+        const payload = buildOccurredMessage(evt, ctx);
         const res = await sendTeams(webhookUrl, payload);
         await logAlert(supabase, {
           alertType: "occurred",
@@ -586,7 +549,7 @@ Deno.serve(async (req: Request) => {
           skippedCount++;
           continue;
         }
-        const payload = buildResolvedMessage(evt, ctx, ratePerHour);
+        const payload = buildResolvedMessage(evt, ctx);
         const res = await sendTeams(webhookUrl, payload);
         await logAlert(supabase, {
           alertType: "resolved",
@@ -616,7 +579,7 @@ Deno.serve(async (req: Request) => {
       if (!evt.resolved && evt.alert_sent && isUnplanned) {
         for (const m of escalationMinutes) {
           if (effectiveDurationMs >= m * 60_000 && (evt.last_escalation_minutes ?? 0) < m) {
-            const payload = buildEscalationMessage(evt, ctx, ratePerHour, m);
+            const payload = buildEscalationMessage(evt, ctx, m);
             const res = await sendTeams(webhookUrl, payload);
             await logAlert(supabase, {
               alertType: "escalation",

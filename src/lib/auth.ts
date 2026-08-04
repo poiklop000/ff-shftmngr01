@@ -10,6 +10,7 @@ export interface AppProfile {
   display_name: string;
   role: Role;
   is_active: boolean;
+  page_access: string[] | null;
   created_at: string;
 }
 
@@ -46,12 +47,29 @@ export async function changePassword(newPassword: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+function isMissingPageAccessError(error: { message: string } | null): boolean {
+  return !!error && /page_access[\s\S]*does not exist/i.test(error.message);
+}
+
+const PROFILE_BASE_COLS = 'user_id, username, display_name, role, is_active, created_at';
+
 export async function fetchProfile(userId: string): Promise<AppProfile | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('user_id, username, display_name, role, is_active, created_at')
+    .select(`${PROFILE_BASE_COLS}, page_access`)
     .eq('user_id', userId)
     .maybeSingle();
+  if (isMissingPageAccessError(error)) {
+    // profiles.page_access doesn't exist yet (migration pending). Fall back to
+    // role defaults so nobody temporarily loses their page access.
+    const { data: fallback, error: fbError } = await supabase
+      .from('profiles')
+      .select(PROFILE_BASE_COLS)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (fbError) throw new Error(fbError.message);
+    return fallback ? { ...(fallback as Omit<AppProfile, 'page_access'>), page_access: null } : null;
+  }
   if (error) throw new Error(error.message);
   return (data as AppProfile | null) ?? null;
 }
@@ -75,7 +93,7 @@ export async function adminListUsers(): Promise<AppProfile[]> {
   return users;
 }
 
-export async function adminCreateUser(input: { username: string; password: string; displayName: string; role: Role }): Promise<AppProfile> {
+export async function adminCreateUser(input: { username: string; password: string; displayName: string; role: Role; pageAccess?: string[] | null }): Promise<AppProfile> {
   const { user } = await callAdmin<{ user: AppProfile }>({ action: 'create', ...input });
   return user;
 }
@@ -88,7 +106,7 @@ export async function adminSetActive(userId: string, isActive: boolean): Promise
   await callAdmin<{ ok: true }>({ action: 'set-active', userId, isActive });
 }
 
-export async function adminUpdateUser(userId: string, patch: { displayName?: string; role?: Role }): Promise<void> {
+export async function adminUpdateUser(userId: string, patch: { displayName?: string; role?: Role; pageAccess?: string[] | null }): Promise<void> {
   await callAdmin<{ ok: true }>({ action: 'update', userId, ...patch });
 }
 

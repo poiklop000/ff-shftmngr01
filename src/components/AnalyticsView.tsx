@@ -1,17 +1,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, Loader2, FileDown, ExternalLink, RefreshCw, Calendar, Clock, FileText, History, MessageSquare } from 'lucide-react';
+import { BarChart3, Loader2, FileDown, RefreshCw, Calendar, Clock, MessageSquare } from 'lucide-react';
 import { PageHelp } from '@/components/PageHelp';
 import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
-import { ShiftReport } from '@/components/ShiftReport';
-import { getActiveHours, type Shift } from '@/types';
 import { fetchDowntimeBetween, formatDuration, localDateTimeToEpoch, type DowntimeComment, type DowntimeEvent } from '@/lib/downtime';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
 import {
   fetchJobsInRange,
-  fetchMonitoringRecordsInRange,
   type JobSnapshotRow,
 } from '@/lib/analytics';
-import { fetchRecordAudit, type MonitoringRecord, type MonitoringRecordAudit } from '@/lib/monitoring';
 
 function csvEscape(value: string | number | null | undefined): string {
   const str = String(value ?? '');
@@ -112,7 +108,6 @@ interface AnalyticsData {
   jobs: JobSnapshotRow[];
   downtime: DowntimeEvent[];
   hourly: HourlySummaryEntry[];
-  records: MonitoringRecord[];
 }
 
 const BAR_COLORS = ['#1d4ed8', '#dc2626', '#eab308', '#16a34a', '#9333ea', '#0e7490', '#ea580c', '#64748b'];
@@ -122,11 +117,10 @@ function barColor(i: number): string {
 }
 
 interface AnalyticsViewProps {
-  onOpenRecord: (recordDate: string, shift: Shift) => Promise<void>;
   syncTick?: number;
 }
 
-export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps) {
+export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
   const [persisted] = useState(() => loadAnalyticsPersist());
   const [startAt, setStartAt] = useState(persisted.startAt);
   const [endAt, setEndAt] = useState(persisted.endAt);
@@ -137,10 +131,6 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [loadedRange, setLoadedRange] = useState<{ start: string; end: string } | null>(persisted.loadedRange);
-  const [reportRecord, setReportRecord] = useState<MonitoringRecord | null>(null);
-  const [auditRecord, setAuditRecord] = useState<MonitoringRecord | null>(null);
-  const [auditEntries, setAuditEntries] = useState<MonitoringRecordAudit[]>([]);
-  const [auditLoading, setAuditLoading] = useState(false);
   const [expandedDowntimeId, setExpandedDowntimeId] = useState<number | null>(null);
 
   // Keep the Analytics filters and last loaded range in localStorage so the
@@ -174,14 +164,13 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps
     try {
       const startDay = start.slice(0, 10);
       const endDay = end.slice(0, 10);
-      const [jobs, downtime, hourlyAll, records] = await Promise.all([
+      const [jobs, downtime, hourlyAll] = await Promise.all([
         fetchJobsInRange(start, end),
         fetchDowntimeBetween(start, end),
         fetchHourlySummaryByDate(startDay, endDay),
-        fetchMonitoringRecordsInRange(startDay, endDay),
       ]);
       const hourly = hourlyAll.filter((h) => h.start >= sEpoch && h.start <= eEpoch);
-      setData({ jobs, downtime, hourly, records });
+      setData({ jobs, downtime, hourly });
       setLoadedRange({ start, end });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load analytics data');
@@ -217,19 +206,6 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps
     setStartAt(st);
     setEndAt(en);
     loadData(st, en);
-  };
-
-  const handleOpenHistory = async (r: MonitoringRecord) => {
-    setAuditRecord(r);
-    setAuditEntries([]);
-    setAuditLoading(true);
-    try {
-      setAuditEntries(await fetchRecordAudit(r.id));
-    } catch (err) {
-      setMsg(err instanceof Error ? err.message : 'Failed to load record history');
-    } finally {
-      setAuditLoading(false);
-    }
   };
 
   // Group job snapshots into one row per distinct OFS job.
@@ -296,8 +272,6 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps
     if (!data) return [];
     return Array.from(new Set(data.downtime.map((e) => e.downtime_type).filter(Boolean))) as string[];
   }, [data]);
-
-  const records = useMemo(() => (data ? data.records : []), [data]);
 
   const { totalDowntimeMs, downtimeCount, longestDowntimeMs, uptimePct, totalOut, avgEfficiency } = useMemo(() => {
     const totalDowntimeMs = downtime.reduce((sum, e) => sum + (e.duration_ms ?? 0), 0);
@@ -372,22 +346,8 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps
       const datePart = h.startText ? h.startText.slice(0, 10) : '';
       rows.push([datePart, h.hour, h.in, h.out, h.rated]);
     }
-    rows.push(['SECTION', 'SAVED RECORDS']);
-    rows.push(['Date', 'Shift', 'SKU', 'Notes', 'Saved By', 'Created At']);
-    for (const r of records) {
-      rows.push([r.record_date, r.shift_name, r.active_job?.sku ?? r.sku, r.notes, r.saved_by, r.created_at]);
-    }
     downloadCsv(`analytics_${loadedRange?.start}_to_${loadedRange?.end}.csv`, ['Analytics Export'], rows);
     setMsg('CSV exported');
-  };
-
-  const handleOpenRecord = async (record: MonitoringRecord) => {
-    try {
-      await onOpenRecord(record.record_date, record.shift_name as Shift);
-      setMsg('Record loaded onto the board');
-    } catch (err) {
-      setMsg(err instanceof Error ? err.message : 'Failed to load record');
-    }
   };
 
   const isLoading = loading;
@@ -397,14 +357,14 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps
     <div>
       <PageHelp
         title="Analytics"
-        intro="Review captured data across any date range: downtime events, active jobs, hourly production, and saved monitoring records — with charts and CSV exports for further analysis."
+        intro="Review captured data across any date range: downtime events, active jobs, and hourly production — with charts and CSV exports for further analysis."
         sections={[
           {
             title: "Selecting a range",
             items: [
               "Choose a start and end date and time, then click Load Data. Quick buttons (Today, 7 Days, 14 Days, 30 Days) set common ranges instantly.",
               "The range uses the factory console clock, so overnight shifts and UTC timestamps are aligned to the line's local date and time.",
-              "The selected date/time window applies to jobs, downtime events, hourly production, and saved records.",
+              "The selected date/time window applies to jobs, downtime events, and hourly production.",
             ],
           },
           {
@@ -426,14 +386,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps
             title: "Exporting",
             items: [
               "Each table has its own Export CSV button for opening the data in Excel.",
-              "Export All downloads jobs, downtime, hourly production, and saved records in one CSV file.",
-            ],
-          },
-          {
-            title: "Saved records",
-            items: [
-              "Saved monitoring records for the range are listed at the bottom with their date, shift, SKU, and notes.",
-              "Open loads that record onto the Monitoring board so you can review or re-print it. Report opens the saved report snapshot in a formatted view, exactly as it was printed when saved.",
+              "Export All downloads jobs, downtime, and hourly production in one CSV file.",
             ],
           },
         ]}
@@ -442,7 +395,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps
       <div className="card card-blue">
         <h3 style={{ margin: 0, border: 'none', padding: 0, borderBottom: '1px solid currentColor', paddingBottom: 6 }}>
           <BarChart3 size={16} style={{ verticalAlign: 'text-bottom', marginRight: 6 }} />
-          Analytics — Data Review
+          Analytics â€” Data Review
         </h3>
 
         <div className="card-row" style={{ flexWrap: 'wrap', gap: 10, marginTop: 10 }}>
@@ -502,7 +455,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps
 
       {isLoading && (
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, padding: 24, fontSize: 13, fontWeight: 600, color: 'var(--text-faint)' }}>
-          <Loader2 size={16} className="animate-spin" /> Loading analytics data…
+          <Loader2 size={16} className="animate-spin" /> Loading analytics dataâ€¦
         </div>
       )}
 
@@ -619,7 +572,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps
                 {jobs.map((j, i) => (
                   <div key={j.jobId}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, marginBottom: 2 }}>
-                      <span>Job {j.jobId} — {j.product}</span>
+                      <span>Job {j.jobId} â€” {j.product}</span>
                       <span>{j.progressPct.toFixed(0)}%</span>
                     </div>
                     <div style={{ width: '100%', height: 12, backgroundColor: 'var(--track-bg)', borderRadius: 6, overflow: 'hidden' }}>
@@ -646,7 +599,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 <input
                   type="search"
-                  placeholder="Search reason…"
+                  placeholder="Search reasonâ€¦"
                   value={textFilter}
                   onChange={(e) => setTextFilter(e.target.value)}
                   style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--input-border)', backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', maxWidth: 160 }}
@@ -754,7 +707,7 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps
                   <div key={category}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, marginBottom: 2 }}>
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>{category}</span>
-                      <span>{formatDuration(ms)} · {count} {count === 1 ? 'event' : 'events'}</span>
+                      <span>{formatDuration(ms)} Â· {count} {count === 1 ? 'event' : 'events'}</span>
                     </div>
                     <div style={{ width: '100%', height: 12, backgroundColor: 'var(--track-bg)', borderRadius: 6, overflow: 'hidden' }}>
                       <div
@@ -847,138 +800,12 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps
             )}
           </div>
 
-          {/* Saved records */}
-          <div className="card card-teal">
-            <h3 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-              <span>Saved Monitoring Records</span>
-              <button
-                type="button"
-                className="tab-btn tab-btn-blue"
-                style={{ padding: '4px 10px', fontSize: 11 }}
-                onClick={() => {
-                  downloadCsv(
-                    `analytics_records_${loadedRange?.start}_to_${loadedRange?.end}.csv`,
-                    ['Date', 'Shift', 'Saved By'],
-                    records.map((r) => [r.record_date, r.shift_name, r.saved_by]),
-                  );
-                  setMsg('Records CSV exported');
-                }}
-              >
-                <FileDown size={12} /> CSV
-              </button>
-            </h3>
-            {records.length === 0 ? (
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500, padding: 8 }}>
-                No saved monitoring records in this range.
-              </div>
-            ) : (
-              <div className="card-scroll">
-                <table className="w-full text-[13px]" style={{ minWidth: 420 }}>
-                  <thead>
-                    <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-800 border-b border-slate-200">
-                      <th className="px-4 py-2.5">Date</th>
-                      <th className="px-4 py-2.5">Shift</th>
-                      <th className="px-4 py-2.5">Saved By</th>
-                      <th className="px-4 py-2.5"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {records.map((r) => (
-                      <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                        <td className="px-4 py-3 text-slate-700">{r.record_date}</td>
-                        <td className="px-4 py-3 text-slate-600">{r.shift_name}</td>
-                        <td className="px-4 py-3 text-slate-600">{r.saved_by || '-'}</td>
-                        <td className="px-4 py-3">
-                          <button type="button" className="tab-btn tab-btn-green" style={{ padding: '4px 10px', fontSize: 11, marginRight: 6 }} onClick={() => handleOpenRecord(r)}>
-                            <ExternalLink size={12} /> Open
-                          </button>
-                          <button type="button" className="tab-btn tab-btn-blue" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => setReportRecord(r)}>
-                            <FileText size={12} /> Report
-                          </button>
-                          <button type="button" className="tab-btn tab-btn-purple" style={{ padding: '4px 10px', fontSize: 11, marginLeft: 6 }} onClick={() => handleOpenHistory(r)}>
-                            <History size={12} /> History
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
         </>
       )}
 
       {msg && (
         <div style={{ textAlign: 'center', marginTop: 10, fontSize: 12, fontWeight: 600, color: 'var(--success-text)' }}>
           {msg}
-        </div>
-      )}
-
-      {reportRecord && (
-        <div className="modal-overlay" onClick={() => setReportRecord(null)}>
-          <div className="modal-card report-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Saved Report — {reportRecord.shift_name} · {reportRecord.record_date}</h2>
-              <button type="button" className="modal-close-btn" onClick={() => setReportRecord(null)} aria-label="Close">✕</button>
-            </div>
-            <ShiftReport
-              shift={reportRecord.shift_name as Shift}
-              date={reportRecord.record_date}
-              hours={reportRecord.hours?.length ? reportRecord.hours : getActiveHours(reportRecord.shift_name as Shift, [])}
-              boardData={reportRecord.board_data}
-              notes={reportRecord.notes ?? ''}
-              sku={reportRecord.sku ?? ''}
-              downtimeEvents={reportRecord.downtime_snapshot ?? []}
-            />
-          </div>
-        </div>
-      )}
-
-      {auditRecord && (
-        <div className="modal-overlay" onClick={() => setAuditRecord(null)}>
-          <div className="modal-card" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Record History — {auditRecord.shift_name} · {auditRecord.record_date}</h2>
-              <button type="button" className="modal-close-btn" onClick={() => setAuditRecord(null)} aria-label="Close">✕</button>
-            </div>
-            <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
-              {auditLoading ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 12, fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>
-                  <Loader2 size={13} className="animate-spin" /> Loading save history…
-                </div>
-              ) : auditEntries.length === 0 ? (
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500, padding: 12 }}>
-                  No save history recorded for this record yet.
-                </div>
-              ) : (
-                <table className="w-full text-[13px]" style={{ minWidth: 520 }}>
-                  <thead>
-                    <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-800 border-b border-slate-200">
-                      <th className="px-4 py-2.5">When</th>
-                      <th className="px-4 py-2.5">User</th>
-                      <th className="px-4 py-2.5">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {auditEntries.map((a) => (
-                      <tr key={a.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                        <td className="px-4 py-3 text-slate-600">{aucklandTime(a.created_at)}</td>
-                        <td className="px-4 py-3 text-slate-700">{a.saved_by || '-'}</td>
-                        <td className="px-4 py-3">
-                          {a.action === 'create' ? (
-                            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--green-tag-text)', backgroundColor: 'var(--green-tag-bg)', border: '1px solid var(--green-tag-border)', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>Created</span>
-                          ) : (
-                            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--amber-tag-text)', backgroundColor: 'var(--amber-tag-bg)', border: '1px solid var(--amber-tag-border)', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>Overwritten</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
         </div>
       )}
     </div>
@@ -996,7 +823,7 @@ function CommentList({ comments }: { comments: DowntimeComment[] }) {
           <MessageSquare size={12} className="text-brand-500 mt-0.5 shrink-0" />
           <div>
             <span className="font-semibold">{c.userName}</span>
-            {c.crewName && <span className="text-slate-400"> · {c.crewName}</span>}
+            {c.crewName && <span className="text-slate-400"> Â· {c.crewName}</span>}
             <span className="text-slate-400 ml-1.5">
               {new Date(c.commentTimestamp).toLocaleString('en-AU', {
                 day: '2-digit',

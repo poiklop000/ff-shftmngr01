@@ -8,14 +8,13 @@ import {
   Loader2,
   Package,
   RefreshCw,
-  Settings2,
   TrendingUp,
   User as UserIcon,
 } from 'lucide-react';
-import { loadLiveIntervals, saveLiveIntervals } from '@/lib/liveConfig';
+import { loadLiveIntervals } from '@/lib/liveConfig';
 import { fetchOfsStatus, classifyLineState, LINE_STATE_COLORS, type OfsLiveStatus, type OfsRunState, type LineStateClass } from '@/lib/ofs';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
-import { fetchDowntimeByDate, type DowntimeEvent } from '@/lib/downtime';
+import { fetchDowntimeByDate, downtimeEventEndText, type DowntimeEvent } from '@/lib/downtime';
 import { filterByShiftWindow, getActiveHours, SHIFT_LABELS, type Shift } from '@/types';
 import { DowntimeTimeline } from '@/components/DowntimeTimeline';
 import { PageHelp } from '@/components/PageHelp';
@@ -46,10 +45,9 @@ interface LiveLineStatusProps {
   currentShift: Shift;
   customHours: string[];
   date: string;
-  isAdmin?: boolean;
 }
 
-export function LiveLineStatus({ currentShift, customHours, date, isAdmin = false }: LiveLineStatusProps) {
+export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStatusProps) {
   const [status, setStatus] = useState<OfsLiveStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,12 +60,6 @@ export function LiveLineStatus({ currentShift, customHours, date, isAdmin = fals
   const [downtimeLoading, setDowntimeLoading] = useState(false);
   const [liveRefreshMs, setLiveRefreshMs] = useState(DEFAULT_LIVE_MS);
   const [summaryRefreshMs, setSummaryRefreshMs] = useState(DEFAULT_SUMMARY_MS);
-  const [showIntervalPanel, setShowIntervalPanel] = useState(false);
-  const [liveMsInput, setLiveMsInput] = useState(String(DEFAULT_LIVE_MS / 1000));
-  const [summaryMsInput, setSummaryMsInput] = useState(String(DEFAULT_SUMMARY_MS / 1000));
-  const [intervalSaving, setIntervalSaving] = useState(false);
-  const [intervalSaved, setIntervalSaved] = useState(false);
-  const [intervalError, setIntervalError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
@@ -99,8 +91,6 @@ export function LiveLineStatus({ currentShift, customHours, date, isAdmin = fals
         if (!mounted) return;
         setLiveRefreshMs(intervals.liveMs);
         setSummaryRefreshMs(intervals.summaryMs);
-        setLiveMsInput(String(intervals.liveMs / 1000));
-        setSummaryMsInput(String(intervals.summaryMs / 1000));
       })
       .catch(() => {});
     return () => { mounted = false; };
@@ -160,41 +150,6 @@ export function LiveLineStatus({ currentShift, customHours, date, isAdmin = fals
     return () => clearInterval(id);
   }, [loadDowntime, date, summaryRefreshMs]);
 
-  const openIntervalPanel = useCallback(() => {
-    setLiveMsInput(String(liveRefreshMs / 1000));
-    setSummaryMsInput(String(summaryRefreshMs / 1000));
-    setIntervalError(null);
-    setIntervalSaved(false);
-    setShowIntervalPanel(true);
-  }, [liveRefreshMs, summaryRefreshMs]);
-
-  const handleSaveIntervals = useCallback(async () => {
-    const liveSecs = parseInt(liveMsInput, 10);
-    const summarySecs = parseInt(summaryMsInput, 10);
-    if (!Number.isFinite(liveSecs) || liveSecs < 1) {
-      setIntervalError('Live refresh must be at least 1 second.');
-      return;
-    }
-    if (!Number.isFinite(summarySecs) || summarySecs < 1) {
-      setIntervalError('Summary refresh must be at least 1 second.');
-      return;
-    }
-    setIntervalSaving(true);
-    setIntervalError(null);
-    setIntervalSaved(false);
-    try {
-      await saveLiveIntervals(liveSecs * 1000, summarySecs * 1000);
-      setLiveRefreshMs(liveSecs * 1000);
-      setSummaryRefreshMs(summarySecs * 1000);
-      setIntervalSaved(true);
-      setTimeout(() => setShowIntervalPanel(false), 600);
-    } catch (err) {
-      setIntervalError(err instanceof Error ? err.message : 'Could not save refresh intervals.');
-    } finally {
-      setIntervalSaving(false);
-    }
-  }, [liveMsInput, summaryMsInput]);
-
   const job = status?.job;
   const order = job?.$order;
   const product = order?.$product;
@@ -244,7 +199,7 @@ export function LiveLineStatus({ currentShift, customHours, date, isAdmin = fals
   );
 
   const shiftDowntimeEvents = useMemo(
-    () => filterByShiftWindow(downtimeEvents, currentShift, customHours, date, (e) => e.start_text),
+    () => filterByShiftWindow(downtimeEvents, currentShift, customHours, date, (e) => e.start_text, undefined, downtimeEventEndText),
     [downtimeEvents, currentShift, customHours, date],
   );
 
@@ -260,7 +215,7 @@ export function LiveLineStatus({ currentShift, customHours, date, isAdmin = fals
               "Line State shows whether the line is running, in setup, down, or planned, colour-coded to match.",
               "Current Rate shows the current throughput in cans per hour, with the rated speed shown underneath when available.",
               "State Time shows how long the line has been in its current state.",
-              "Auto-refresh is on by default and updates on a set interval. Toggle it off to pause, or use the Refresh button to load once. Admins can change the interval with the gear button beside Refresh.",
+              "Auto-refresh is on by default and updates on a set interval. Toggle it off to pause, or use the Refresh button to load once. The refresh intervals are configured on the Admin page.",
               "If the data can't load, check that the OFS credentials are configured as Supabase secrets.",
             ],
           },
@@ -320,74 +275,8 @@ export function LiveLineStatus({ currentShift, customHours, date, isAdmin = fals
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             Refresh
           </button>
-          {isAdmin && (
-            <button
-              type="button"
-              title="Auto-refresh intervals"
-              aria-label="Auto-refresh intervals"
-              className="flex items-center justify-center w-9 h-9 rounded-md text-[12px] font-bold text-white bg-slate-700 hover:bg-slate-600 transition-colors"
-              onClick={openIntervalPanel}
-            >
-              <Settings2 size={16} />
-            </button>
-          )}
         </div>
       </div>
-
-      {isAdmin && showIntervalPanel && (
-        <div className="rounded-lg border border-slate-200 bg-white p-4 mb-4 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2 text-[13px] font-bold text-slate-800">
-              <Settings2 size={15} /> Auto-refresh intervals
-            </div>
-            <button
-              type="button"
-              className="text-[12px] font-bold text-slate-500 hover:text-slate-800"
-              onClick={() => setShowIntervalPanel(false)}
-            >
-              Close
-            </button>
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
-            <label className="flex flex-col gap-1 text-[12px] font-semibold text-slate-600">
-              Live status refresh (seconds)
-              <input
-                type="number"
-                min="1"
-                className="w-28 px-2 py-1.5 rounded-md border border-slate-300 text-[13px] font-bold text-slate-800"
-                value={liveMsInput}
-                onChange={(e) => setLiveMsInput(e.target.value)}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-[12px] font-semibold text-slate-600">
-              Summary / downtime refresh (seconds)
-              <input
-                type="number"
-                min="1"
-                className="w-28 px-2 py-1.5 rounded-md border border-slate-300 text-[13px] font-bold text-slate-800"
-                value={summaryMsInput}
-                onChange={(e) => setSummaryMsInput(e.target.value)}
-              />
-            </label>
-            <div className="flex items-end gap-2">
-              <button
-                type="button"
-                className="px-3.5 py-2 rounded-md text-[12px] font-bold text-white bg-green-700 hover:bg-green-600 transition-colors"
-                onClick={handleSaveIntervals}
-                disabled={intervalSaving}
-              >
-                {intervalSaving ? <Loader2 size={14} className="animate-spin" /> : 'Save'}
-              </button>
-            </div>
-          </div>
-          {intervalError && (
-            <div className="mt-2 text-[12px] font-semibold text-red-700">{intervalError}</div>
-          )}
-          {intervalSaved && (
-            <div className="mt-2 text-[12px] font-semibold text-green-700">Intervals saved and applied.</div>
-          )}
-        </div>
-      )}
 
       {error && (
         <div className="flex items-start gap-3 rounded-lg p-4 mb-4 border border-red-200 bg-red-50 text-red-800">

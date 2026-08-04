@@ -143,16 +143,12 @@ export function DashboardView({ date, currentShift, customHours, isAdmin = false
     [summaryHook.data, currentShift, customHours, date],
   );
 
-  // OFS labels each hour bucket with its END time, so the entry at H holds the
-  // production for H-1..H. Display each entry one hour earlier so "18:00"
-  // shows the output produced between 18:00 and 19:00.
-  const shiftedRows = useMemo(() => {
-    const rows: { hour: string; output: number }[] = [];
-    for (let i = 0; i < shiftSummary.length - 1; i++) {
-      rows.push({ hour: shiftSummary[i].hour, output: shiftSummary[i + 1].in });
-    }
-    return rows;
-  }, [shiftSummary]);
+  // Each OFS hourly entry is labelled with the hour it covers, so the 18:00
+  // bucket (in=23,462) is the output produced between 18:00 and 19:00.
+  const productionRows = useMemo(
+    () => shiftSummary.map((e) => ({ hour: e.hour, output: e.in })),
+    [shiftSummary],
+  );
 
   const maxReasonMs = summaryHook.data?.reasons.reduce((m, r) => Math.max(m, r.ms), 0) ?? 0;
   const alerts = alertsHook.data ?? [];
@@ -277,7 +273,7 @@ export function DashboardView({ date, currentShift, customHours, isAdmin = false
               {SHIFT_LABELS[currentShift]} · Today's Production
             </h3>
           </div>
-          {shiftedRows.length === 0 ? (
+          {productionRows.length === 0 ? (
             <div className="text-[13px] font-medium text-green-700">No hourly data for this shift yet.</div>
           ) : (
             <div className="overflow-x-auto">
@@ -291,7 +287,7 @@ export function DashboardView({ date, currentShift, customHours, isAdmin = false
                   </tr>
                 </thead>
                 <tbody>
-                  {shiftedRows.map((row, i) => (
+                  {productionRows.map((row, i) => (
                     <tr key={i} className="border-b border-green-100">
                       <td className="px-2 py-1.5 font-semibold text-left">{row.hour}</td>
                       <td className="px-2 py-1.5 text-right">{ratedSpeed > 0 ? ratedSpeed.toLocaleString() : '-'}</td>

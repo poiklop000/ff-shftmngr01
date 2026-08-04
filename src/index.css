@@ -1304,3 +1304,85 @@ html[data-theme='dark'] .footer strong { color: #93c5fd; }
 
 /* ---- Timeline now marker (visible on dark track) ---- */
 html[data-theme='dark'] .relative.h-9 .bg-slate-700 { background-color: #cbd5e1 !important; }
+
+/* =========================================================
+   Saved/print report stays light even in dark mode
+   ========================================================= */
+/* Report modal chrome (preview of the printed report) */
+html[data-theme='dark'] .modal-card.report-modal { background-color: #ffffff; }
+html[data-theme='dark'] .modal-card.report-modal .modal-header h2 { color: #0f172a; }
+html[data-theme='dark'] .modal-card.report-modal .modal-close-btn {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #64748b;
+}
+html[data-theme='dark'] .modal-card.report-modal .modal-close-btn:hover { background: #e2e8f0; color: #0f172a; }
+
+/* Surfaces inside the report (incl. the downtime timeline) */
+html[data-theme='dark'] .shift-report .bg-white { background-color: #ffffff !important; }
+html[data-theme='dark'] .shift-report .bg-slate-100 { background-color: #f1f5f9 !important; }
+html[data-theme='dark'] .shift-report .bg-slate-700 { background-color: #334155 !important; }
+html[data-theme='dark'] .shift-report .border-slate-200 { border-color: #e2e8f0 !important; }
+html[data-theme='dark'] .shift-report .text-slate-400 { color: #94a3b8 !important; }
+html[data-theme='dark'] .shift-report .text-slate-500 { color: #64748b !important; }
+html[data-theme='dark'] .shift-report .text-slate-600 { color: #475569 !important; }
+html[data-theme='dark'] .shift-report .text-slate-700 { color: #334155 !important; }
+
+/* Toggles and OEE inside the report */
+html[data-theme='dark'] .shift-report .toggle-btn.neutral {
+  background-color: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #94a3b8 !important;
+}
+html[data-theme='dark'] .shift-report .toggle-btn.pass {
+  background-color: #166534 !important;
+  border-color: #166534 !important;
+  color: #ffffff !important;
+}
+html[data-theme='dark'] .shift-report .toggle-btn.issue {
+  background-color: #b91c1c !important;
+  border-color: #b91c1c !important;
+  color: #ffffff !important;
+}
+html[data-theme='dark'] .shift-report .oee-pass { color: #166534 !important; }
+html[data-theme='dark'] .shift-report .oee-fail { color: #b91c1c !important; }
+html[data-theme='dark'] .shift-report .oee-neutral { color: #94a3b8 !important; }
+
+/* Print output stays light even from dark theme. These repeat the dark-theme
+   selectors with equal specificity but later source order so they win, and
+   the toggle/OEE/utility rules force the light print palette. */
+@media print {
+  html[data-theme='dark'] .bg-white { background-color: #ffffff !important; }
+  html[data-theme='dark'] .bg-slate-50 { background-color: #f8fafc !important; }
+  html[data-theme='dark'] .bg-slate-100 { background-color: #f1f5f9 !important; }
+  html[data-theme='dark'] .bg-slate-200 { background-color: #e2e8f0 !important; }
+  html[data-theme='dark'] .bg-slate-700 { background-color: #334155 !important; }
+  html[data-theme='dark'] .relative.h-9 .bg-slate-700 { background-color: #334155 !important; }
+  html[data-theme='dark'] .text-slate-400 { color: #94a3b8 !important; }
+  html[data-theme='dark'] .text-slate-500 { color: #64748b !important; }
+  html[data-theme='dark'] .text-slate-600 { color: #475569 !important; }
+  html[data-theme='dark'] .text-slate-700 { color: #334155 !important; }
+  html[data-theme='dark'] .text-slate-800 { color: #1e293b !important; }
+  html[data-theme='dark'] .border-slate-100 { border-color: #e2e8f0 !important; }
+  html[data-theme='dark'] .border-slate-200 { border-color: #e2e8f0 !important; }
+  html[data-theme='dark'] .toggle-btn.neutral {
+    background-color: #f1f5f9 !important;
+    border-color: #cbd5e1 !important;
+    color: #94a3b8 !important;
+  }
+  html[data-theme='dark'] .toggle-btn.pass {
+    background-color: #166534 !important;
+    border-color: #166534 !important;
+    color: #ffffff !important;
+  }
+  html[data-theme='dark'] .toggle-btn.issue {
+    background-color: #b91c1c !important;
+    border-color: #b91c1c !important;
+    color: #ffffff !important;
+  }
+  html[data-theme='dark'] .oee-pass { color: #166534 !important; }
+  html[data-theme='dark'] .oee-fail { color: #b91c1c !important; }
+  html[data-theme='dark'] .oee-neutral { color: #94a3b8 !important; }
+  html[data-theme='dark'] .table-input.yield-input-red { color: #b91c1c !important; }
+  html[data-theme='dark'] .table-input.yield-input-green { color: #166534 !important; }
+}

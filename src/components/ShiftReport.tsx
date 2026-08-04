@@ -32,8 +32,8 @@ function yieldColors(raw: string): { color: string; fontWeight: number } | null 
   const val = (raw || '').replace(/%/g, '').trim();
   if (val === '') return null;
   return parseFloat(val) < 97.0
-    ? { color: 'var(--danger-text)', fontWeight: 700 }
-    : { color: 'var(--success-text)', fontWeight: 700 };
+    ? { color: '#b91c1c', fontWeight: 700 }
+    : { color: '#166534', fontWeight: 700 };
 }
 
 /**

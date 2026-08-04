@@ -512,8 +512,10 @@ Deno.serve(async (req: Request) => {
       }
 
       // Escalation: ongoing event that already fired its initial alert and has
-      // now crossed the next escalation threshold.
-      if (!evt.resolved && evt.alert_sent) {
+      // now crossed the next escalation threshold. Only UNPLANNED downtimes
+      // escalate, so routine planned/setup stops never page people.
+      const isUnplanned = (evt.downtime_type ?? "").toUpperCase() === "UNPLANNED";
+      if (!evt.resolved && evt.alert_sent && isUnplanned) {
         for (const m of escalationMinutes) {
           if (effectiveDurationMs >= m * 60_000 && (evt.last_escalation_minutes ?? 0) < m) {
             const payload = buildEscalationMessage(evt, ctx, ratePerHour, m);

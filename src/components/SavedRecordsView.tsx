@@ -10,9 +10,10 @@ import {
 import { fetchRecordAudit, type MonitoringRecord, type MonitoringRecordAudit } from '@/lib/monitoring';
 import { downloadCsv } from '@/lib/export';
 
-const isIOS =
+const isIOS = () =>
   /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
+  window.matchMedia('(display-mode: standalone)').matches;
 
 export function SavedRecordsView() {
   const [records, setRecords] = useState<MonitoringRecord[]>([]);
@@ -126,7 +127,7 @@ export function SavedRecordsView() {
     // and the next snapshot would print the app's record list instead. On iOS,
     // restore only when the sheet closes (the window regains focus / becomes
     // visible again) or after the safety timeout.
-    if (!isIOS) {
+    if (!isIOS()) {
       window.addEventListener('afterprint', restore);
     } else {
       window.addEventListener('focus', restore);
@@ -152,7 +153,7 @@ export function SavedRecordsView() {
     // On iOS (especially a home-screen standalone PWA) a popup is a dead end:
     // there is no tab bar to get back to the app, and the popup's print output
     // can be cut off. Print from the current page instead.
-    if (isIOS) {
+    if (isIOS()) {
       printReportInPage(reportHtml, title);
       setMsg('Report sent to printer');
       return;

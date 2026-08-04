@@ -1020,6 +1020,11 @@ tbody tr:hover { background-color: #eff6ff; }
      below handle printing while a record modal is open. */
   body.printing-saved-report #root { display: none !important; }
   body.printing-saved-report #print-report-root { display: block !important; }
+
+  /* The .shift-report table is sized for the analytics modal (min-width 1150px),
+     which overflows the landscape print page and clips the right columns. Let
+     the fixed column widths below fit the page, like the Monitoring table. */
+  .shift-report table { min-width: 0 !important; }
   .modal-overlay {
     position: static !important;
     inset: auto !important;

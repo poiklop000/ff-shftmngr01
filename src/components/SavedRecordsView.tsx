@@ -10,6 +10,10 @@ import {
 import { fetchRecordAudit, type MonitoringRecord, type MonitoringRecordAudit } from '@/lib/monitoring';
 import { downloadCsv } from '@/lib/export';
 
+const isIOS =
+  /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
 export function SavedRecordsView() {
   const [records, setRecords] = useState<MonitoringRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,35 +82,23 @@ export function SavedRecordsView() {
     setMsg('Records CSV exported');
   };
 
-  const handlePrintReport = (r: MonitoringRecord) => {
-    // Print by swapping the LIVE document to contain only the report, using
-    // inline styles — never @media print CSS. iOS Safari snapshots the live DOM
-    // for printing, and on device rotation it re-snapshots it; if the report
-    // layout depends on print stylesheets (as .print-only did) iOS drops them
-    // and prints the app page instead. With the app root hidden inline and the
-    // report appended to <body>, every snapshot (any orientation) contains only
-    // the report.
+  const printReportInPage = (reportHtml: string, title: string) => {
+    // Fallback used only when a new print window cannot be opened (popup
+    // blocked). Swaps the live document so it contains only the report, using
+    // inline styles — never @media print CSS — because iOS Safari snapshots the
+    // live DOM for printing and may drop print stylesheets when the device is
+    // rotated in the print sheet.
     document.getElementById('print-report-root')?.remove();
     const printRoot = document.createElement('div');
     printRoot.id = 'print-report-root';
-    printRoot.innerHTML = renderToStaticMarkup(
-      <ShiftReport
-        shift={r.shift_name as Shift}
-        date={r.record_date}
-        hours={r.hours?.length ? r.hours : getActiveHours(r.shift_name as Shift, [])}
-        boardData={r.board_data}
-        notes={r.notes ?? ''}
-        sku={r.sku ?? ''}
-        downtimeEvents={r.downtime_snapshot ?? []}
-      />,
-    );
+    printRoot.innerHTML = reportHtml;
     document.body.appendChild(printRoot);
 
     const appRoot = document.getElementById('root');
     appRoot?.style.setProperty('display', 'none', 'important');
     document.body.classList.add('printing-saved-report');
     const originalTitle = document.title;
-    document.title = `FF_${r.shift_name}${r.record_date ? `_${r.record_date}` : ''}`;
+    document.title = title;
 
     const restore = () => {
       document.getElementById('print-report-root')?.remove();
@@ -127,6 +119,58 @@ export function SavedRecordsView() {
     window.addEventListener('afterprint', restore);
     document.addEventListener('visibilitychange', onVisibility);
     window.setTimeout(() => window.print(), 250);
+  };
+
+  const handlePrintReport = (r: MonitoringRecord) => {
+    const reportHtml = renderToStaticMarkup(
+      <ShiftReport
+        shift={r.shift_name as Shift}
+        date={r.record_date}
+        hours={r.hours?.length ? r.hours : getActiveHours(r.shift_name as Shift, [])}
+        boardData={r.board_data}
+        notes={r.notes ?? ''}
+        sku={r.sku ?? ''}
+        downtimeEvents={r.downtime_snapshot ?? []}
+      />,
+    );
+    // Open a brand-new window that contains ONLY the report, with the app's full
+    // stylesheet inlined so its @media print rules (landscape page, table
+    // widths, header repeats) render the report exactly like the Monitoring
+    // page's Print Report. Because the printable document has no other content,
+    // rotating the device in the iOS print sheet re-snapshots just the report —
+    // it can never show the Saved Monitoring Records list.
+    const css = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+      .map((el) => el.outerHTML)
+      .join('\n');
+    const title = `FF_${r.shift_name}${r.record_date ? `_${r.record_date}` : ''}`;
+
+    const win = window.open('', '_blank');
+    if (!win) {
+      printReportInPage(reportHtml, title);
+      setMsg('Report sent to printer');
+      return;
+    }
+    try {
+      const doc = win.document;
+      doc.open();
+      doc.write(`<!DOCTYPE html><html><head><title>${title}</title>${css}</head><body>${reportHtml}</body></html>`);
+      doc.close();
+    } catch {
+      try { win.close(); } catch { /* ignore */ }
+      printReportInPage(reportHtml, title);
+      setMsg('Report sent to printer');
+      return;
+    }
+    window.setTimeout(() => {
+      try {
+        win.focus();
+        win.print();
+      } catch { /* ignore */ }
+    }, 500);
+    if (!isIOS) {
+      win.addEventListener('afterprint', () => { try { win.close(); } catch { /* ignore */ } });
+      window.setTimeout(() => { try { win.close(); } catch { /* ignore */ } }, 120_000);
+    }
     setMsg('Report sent to printer');
   };
 

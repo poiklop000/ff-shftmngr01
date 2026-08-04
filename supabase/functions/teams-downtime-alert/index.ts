@@ -187,10 +187,21 @@ async function sendTeams(
   webhookUrl: string,
   payload: Record<string, unknown>,
 ): Promise<boolean> {
+  // The Teams "Send webhook alerts to a channel" workflow expects a message
+  // envelope with the AdaptiveCard attached, not the bare card.
+  const body = {
+    type: "message",
+    attachments: [
+      {
+        contentType: "application/vnd.microsoft.card.adaptive",
+        content: payload,
+      },
+    ],
+  };
   const res = await fetch(webhookUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "<no body>");

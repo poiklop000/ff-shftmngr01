@@ -1,12 +1,11 @@
 /* Service worker for the Canning Line Console (GH Pages base: /ff-shftmngr01/) */
-const CACHE = 'canning-console-v1';
-const PRECACHE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+const CACHE = 'canning-console-v2';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(CACHE)
-      .then((cache) => cache.addAll(PRECACHE))
+      .then((cache) => cache.addAll(['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png']))
       .then(() => self.skipWaiting()),
   );
 });
@@ -20,39 +19,26 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+/* Network-first with cache fallback: when online the app always serves the
+   newest build; the cache is only a fallback for offline use. This avoids
+   home-screen PWAs running stale cached bundles after a new deploy. */
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
-  if (url.pathname.endsWith('/manifest.webmanifest')) {
-    event.respondWith(caches.match(request).then((cached) => cached || fetch(request)));
-    return;
-  }
-
-  if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(request, copy));
-          return response;
-        })
-        .catch(() => caches.match(request).then((cached) => cached || caches.match('./index.html'))),
-    );
-    return;
-  }
 
   event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request).then((response) => {
+    fetch(request)
+      .then((response) => {
         if (response.ok) {
           const copy = response.clone();
           caches.open(CACHE).then((cache) => cache.put(request, copy));
         }
         return response;
-      });
-    }),
+      })
+      .catch(() =>
+        caches.match(request).then((cached) => cached || caches.match('./index.html')),
+      ),
   );
 });

@@ -15,7 +15,7 @@ import {
 import { loadLiveIntervals } from '@/lib/liveConfig';
 import { useAutoRefresh } from '@/lib/useAutoRefresh';
 import { fetchAlertHistory, type AlertLogRow } from '@/lib/alertLog';
-import { fetchOfsStatus, classifyLineState, LINE_STATE_COLORS, type OfsRunState } from '@/lib/ofs';
+import { fetchOfsStatus, classifyLineState, LINE_STATE_COLORS, type OfsRunState, type LineStateClass } from '@/lib/ofs';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
 import { fetchDowntimeByDate, fetchDowntimeBetween, formatDuration, type DowntimeEvent } from '@/lib/downtime';
 import { filterByShiftWindow, SHIFT_LABELS, type Shift } from '@/types';
@@ -185,20 +185,23 @@ export function DashboardView({ date, currentShift, customHours, isAdmin = false
           icon={<Gauge size={18} />}
           label="Line State"
           value={runstate?.description || runstate?.name || '-'}
-          color={stateColor}
+          accent={lineStateClass}
+          badge={<span className="inline-block w-2.5 h-2.5 rounded-full animate-pulse" style={{ backgroundColor: stateColor }} />}
         />
         <DashboardStat
           icon={<TrendingUp size={18} />}
           label="Current Rate"
           value={`${Math.round(currentRate * 3600).toLocaleString()} /hr`}
           hint={ratedSpeed > 0 ? `Rated: ${ratedSpeed.toLocaleString()} /hr` : undefined}
-          color={stateColor}
+          accent="blue"
         />
         <DashboardStat
           icon={<Clock size={18} />}
           label="State Time"
-          value={formatStateDuration(runstate)}
-          color={stateColor}
+          value={formatStateDuration(runstate, statusHook.lastUpdated)}
+          hint={runstate?.description || runstate?.name || undefined}
+          accent={lineStateClass}
+          badge={<span className="inline-block w-2.5 h-2.5 rounded-full animate-pulse" style={{ backgroundColor: stateColor }} />}
         />
       </div>
 
@@ -386,16 +389,40 @@ export function DashboardView({ date, currentShift, customHours, isAdmin = false
   );
 }
 
-function DashboardStat({ icon, label, value, hint, color }: { icon: React.ReactNode; label: string; value: string; hint?: string; color: string }) {
+function DashboardStat({
+  icon,
+  label,
+  value,
+  hint,
+  accent,
+  badge,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  hint?: string;
+  accent: LineStateClass | 'blue' | 'slate';
+  badge?: React.ReactNode;
+}) {
+  const tones: Record<string, string> = {
+    running: 'border-green-200 bg-green-50 text-green-900',
+    slow: 'border-lime-300 bg-lime-50 text-lime-900',
+    setup: 'border-yellow-200 bg-yellow-50 text-yellow-900',
+    downtime: 'border-red-200 bg-red-50 text-red-900',
+    planned: 'border-blue-200 bg-blue-50 text-blue-900',
+    idle: 'border-slate-200 bg-slate-50 text-slate-900',
+    blue: 'border-blue-200 bg-blue-50 text-blue-900',
+    slate: 'border-slate-200 bg-slate-50 text-slate-900',
+  };
   return (
-    <div className="card rounded-lg p-3.5 border border-slate-200 bg-slate-50 text-slate-900">
+    <div className={`card rounded-lg p-3.5 border ${tones[accent]}`}>
       <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide opacity-80 mb-1">
         {icon}
         <span>{label}</span>
       </div>
       <div className="flex items-center gap-2">
         <span className="text-xl font-bold">{value}</span>
-        <span className="inline-block w-2.5 h-2.5 rounded-full animate-pulse" style={{ backgroundColor: color }} />
+        {badge}
       </div>
       {hint && <div className="text-[11px] font-medium opacity-70 mt-0.5">{hint}</div>}
     </div>
@@ -435,10 +462,11 @@ function AlertBadge({ type, status }: { type: string; status: string }) {
   );
 }
 
-function formatStateDuration(runstate: OfsRunState | undefined): string {
+function formatStateDuration(runstate: OfsRunState | undefined, lastUpdated: Date | null): string {
   if (!runstate) return '-';
   if (runstate.start && runstate.start > 0) {
-    return formatElapsedMs(Math.max(0, Date.now() - runstate.start));
+    const now = lastUpdated ? lastUpdated.getTime() : Date.now();
+    return formatElapsedMs(Math.max(0, now - runstate.start));
   }
   if (runstate.duration && runstate.duration > 0) {
     return formatElapsedMs(runstate.duration);

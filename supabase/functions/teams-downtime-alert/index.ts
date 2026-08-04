@@ -493,8 +493,11 @@ Deno.serve(async (req: Request) => {
     for (const evt of events) {
       const needsOccurred = !evt.alert_sent && !evt.resolved;
       const needsResolved = !evt.resolved_alert_sent && evt.resolved;
+      // An event that already fired its initial alert is still a candidate for
+      // escalation while it remains unresolved — it must not be skipped here.
+      const needsEscalation = !evt.resolved && evt.alert_sent;
 
-      if (!needsOccurred && !needsResolved) {
+      if (!needsOccurred && !needsResolved && !needsEscalation) {
         skippedCount++;
         continue;
       }
@@ -577,30 +580,34 @@ Deno.serve(async (req: Request) => {
       // escalate, so routine planned/setup stops never page people.
       const isUnplanned = (evt.downtime_type ?? "").toUpperCase() === "UNPLANNED";
       if (!evt.resolved && evt.alert_sent && isUnplanned) {
-        for (const m of escalationMinutes) {
-          if (effectiveDurationMs >= m * 60_000 && (evt.last_escalation_minutes ?? 0) < m) {
-            const payload = buildEscalationMessage(evt, ctx, m);
-            const res = await sendTeams(webhookUrl, payload);
-            await logAlert(supabase, {
-              alertType: "escalation",
-              eventId: evt.id,
-              reason: evt.reason,
-              category: evt.category,
-              product,
-              message: `Downtime Still Ongoing — ${evt.console_name ?? "Production Line"} (${m} min)`,
-              status: res.ok ? "sent" : "failed",
-              httpStatus: res.httpStatus,
-            });
-            if (res.ok) {
-              await supabase
-                .from("downtime_events")
-                .update({ last_escalation_minutes: m, updated_at: new Date().toISOString() })
-                .eq("id", evt.id);
-              escalationCount++;
-            } else {
-              failed.push(evt.id);
-            }
-            break;
+        // Pick the highest threshold the event has now crossed that hasn't been
+        // alerted yet, so a long-running downtime jumps straight to the correct
+        // level instead of replaying 30/60/120 over consecutive runs.
+        const crossed = escalationMinutes.filter(
+          (m) => effectiveDurationMs >= m * 60_000 && (evt.last_escalation_minutes ?? 0) < m,
+        );
+        if (crossed.length > 0) {
+          const m = crossed[crossed.length - 1]!;
+          const payload = buildEscalationMessage(evt, ctx, m);
+          const res = await sendTeams(webhookUrl, payload);
+          await logAlert(supabase, {
+            alertType: "escalation",
+            eventId: evt.id,
+            reason: evt.reason,
+            category: evt.category,
+            product,
+            message: `Downtime Still Ongoing — ${evt.console_name ?? "Production Line"} (${m} min)`,
+            status: res.ok ? "sent" : "failed",
+            httpStatus: res.httpStatus,
+          });
+          if (res.ok) {
+            await supabase
+              .from("downtime_events")
+              .update({ last_escalation_minutes: m, updated_at: new Date().toISOString() })
+              .eq("id", evt.id);
+            escalationCount++;
+          } else {
+            failed.push(evt.id);
           }
         }
       }

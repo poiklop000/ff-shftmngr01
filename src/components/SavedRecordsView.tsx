@@ -83,11 +83,13 @@ export function SavedRecordsView() {
   };
 
   const printReportInPage = (reportHtml: string, title: string) => {
-    // Fallback used only when a new print window cannot be opened (popup
-    // blocked). Swaps the live document so it contains only the report, using
-    // inline styles — never @media print CSS — because iOS Safari snapshots the
-    // live DOM for printing and may drop print stylesheets when the device is
-    // rotated in the print sheet.
+    // Prints from the current page (used on iOS — a standalone home-screen PWA
+    // can't return from a popup — and as a fallback when popups are blocked).
+    // The app root is hidden with inline styles and the report is appended to
+    // <body>, so the live document contains only the report. iOS Safari prints a
+    // snapshot of the live DOM and re-snapshots it when the device is rotated in
+    // the print sheet; inline styles survive that, and because the app is still
+    // hidden, the re-snapshot can never show the "Saved Monitoring Records" list.
     document.getElementById('print-report-root')?.remove();
     const printRoot = document.createElement('div');
     printRoot.id = 'print-report-root';
@@ -100,24 +102,36 @@ export function SavedRecordsView() {
     const originalTitle = document.title;
     document.title = title;
 
+    let restored = false;
     const restore = () => {
+      if (restored) return;
+      restored = true;
       document.getElementById('print-report-root')?.remove();
       appRoot?.style.removeProperty('display');
       document.body.classList.remove('printing-saved-report');
       document.title = originalTitle;
       window.removeEventListener('afterprint', restore);
+      window.removeEventListener('focus', restore);
       document.removeEventListener('visibilitychange', onVisibility);
       window.clearTimeout(safetyTimer);
     };
     const onVisibility = () => {
-      // iOS Safari does not reliably fire afterprint; the page becomes visible
-      // again when the print sheet closes, so restore then too.
       if (document.visibilityState === 'visible') restore();
     };
-    const safetyTimer = window.setTimeout(restore, 30_000);
+    const safetyTimer = window.setTimeout(restore, 60_000);
 
-    window.addEventListener('afterprint', restore);
-    document.addEventListener('visibilitychange', onVisibility);
+    // Desktop fires afterprint when the print dialog closes. iOS Safari fires
+    // afterprint as soon as the print sheet OPENS (and not reliably at all), so
+    // restoring on it would hide the report before the user rotates the device,
+    // and the next snapshot would print the app's record list instead. On iOS,
+    // restore only when the sheet closes (the window regains focus / becomes
+    // visible again) or after the safety timeout.
+    if (!isIOS) {
+      window.addEventListener('afterprint', restore);
+    } else {
+      window.addEventListener('focus', restore);
+      document.addEventListener('visibilitychange', onVisibility);
+    }
     window.setTimeout(() => window.print(), 250);
   };
 
@@ -133,16 +147,24 @@ export function SavedRecordsView() {
         downtimeEvents={r.downtime_snapshot ?? []}
       />,
     );
-    // Open a brand-new window that contains ONLY the report, with the app's full
-    // stylesheet inlined so its @media print rules (landscape page, table
-    // widths, header repeats) render the report exactly like the Monitoring
-    // page's Print Report. Because the printable document has no other content,
-    // rotating the device in the iOS print sheet re-snapshots just the report —
-    // it can never show the Saved Monitoring Records list.
+    const title = `FF_${r.shift_name}${r.record_date ? `_${r.record_date}` : ''}`;
+
+    // On iOS (especially a home-screen standalone PWA) a popup is a dead end:
+    // there is no tab bar to get back to the app, and the popup's print output
+    // can be cut off. Print from the current page instead.
+    if (isIOS) {
+      printReportInPage(reportHtml, title);
+      setMsg('Report sent to printer');
+      return;
+    }
+
+    // Desktop: open a brand-new window containing ONLY the report, with the
+    // app's full stylesheet inlined so its @media print rules (landscape page,
+    // table widths, header repeats) render the report exactly like the
+    // Monitoring page's Print Report.
     const css = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
       .map((el) => el.outerHTML)
       .join('\n');
-    const title = `FF_${r.shift_name}${r.record_date ? `_${r.record_date}` : ''}`;
 
     const win = window.open('', '_blank');
     if (!win) {
@@ -167,10 +189,8 @@ export function SavedRecordsView() {
         win.print();
       } catch { /* ignore */ }
     }, 500);
-    if (!isIOS) {
-      win.addEventListener('afterprint', () => { try { win.close(); } catch { /* ignore */ } });
-      window.setTimeout(() => { try { win.close(); } catch { /* ignore */ } }, 120_000);
-    }
+    win.addEventListener('afterprint', () => { try { win.close(); } catch { /* ignore */ } });
+    window.setTimeout(() => { try { win.close(); } catch { /* ignore */ } }, 120_000);
     setMsg('Report sent to printer');
   };
 

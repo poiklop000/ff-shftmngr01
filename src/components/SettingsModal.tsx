@@ -386,7 +386,7 @@ export function SettingsModal({ open, onClose, isAdmin, kiosk = false, onKioskCh
                 </div>
               </div>
               <small style={{ display: 'block', marginTop: 8, color: 'var(--text-muted, #888)', fontSize: 12 }}>
-                How often the Live, Dashboard, and Analytics screens re-fetch data automatically.
+                How often the Live and Analytics screens re-fetch data automatically.
               </small>
             </div>
 

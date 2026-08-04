@@ -236,8 +236,12 @@ export function LiveLineStatus({ currentShift, customHours, date, isAdmin = fals
     [summary, currentShift, customHours, date],
   );
 
-  const totalIn = useMemo(() => shiftSummary.reduce((s, e) => s + e.in, 0), [shiftSummary]);
-  const totalOut = useMemo(() => shiftSummary.reduce((s, e) => s + e.out, 0), [shiftSummary]);
+  // Each OFS hourly entry is labelled with the hour it covers, so the 18:00
+  // bucket is the output produced between 18:00 and 19:00.
+  const productionRows = useMemo(
+    () => shiftSummary.map((e) => ({ hour: e.hour, output: e.in })),
+    [shiftSummary],
+  );
 
   const shiftDowntimeEvents = useMemo(
     () => filterByShiftWindow(downtimeEvents, currentShift, customHours, date, (e) => e.start_text),
@@ -526,7 +530,7 @@ export function LiveLineStatus({ currentShift, customHours, date, isAdmin = fals
           <div className="flex items-center gap-2">
             <Boxes size={18} className="text-slate-700" />
             <h3 className="m-0 text-sm font-bold uppercase tracking-wide text-slate-800">
-              Production Counter Summary - {SHIFT_LABELS[currentShift]}
+              Today's Production - {SHIFT_LABELS[currentShift]}
             </h3>
           </div>
           <div className="flex items-center gap-2">
@@ -543,8 +547,8 @@ export function LiveLineStatus({ currentShift, customHours, date, isAdmin = fals
         </div>
 
         <p className="text-[12px] text-slate-600 m-0 mb-4 leading-relaxed">
-          Hourly production counts pulled live from OFS. Each row shows the In (throughput)
-          and Out (output) for that hour — no background capture needed.
+          Hourly output pulled live from OFS, compared against the active job's rated speed.
+          OEE = Output ÷ Rated Speed.
         </p>
 
         {summaryError && (
@@ -563,7 +567,7 @@ export function LiveLineStatus({ currentShift, customHours, date, isAdmin = fals
           <div className="text-center text-[13px] text-slate-500 font-medium py-6">
             Pick a date above to load production counts for that day.
           </div>
-        ) : shiftSummary.length === 0 ? (
+        ) : productionRows.length === 0 ? (
           <div className="text-center text-[13px] text-slate-500 font-medium py-6">
             No production data for {SHIFT_LABELS[currentShift]} on {date}.
           </div>
@@ -571,34 +575,31 @@ export function LiveLineStatus({ currentShift, customHours, date, isAdmin = fals
             <div className="card rounded-lg border border-slate-200 bg-white overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-200 bg-slate-50">
                 <h3 className="m-0 text-sm font-bold uppercase tracking-wide text-slate-700">
-                  {SHIFT_LABELS[currentShift]} · Hourly Production Counts
+                  {SHIFT_LABELS[currentShift]} · Today's Production
                 </h3>
               </div>
               <div className="overflow-x-auto">
                 <table className="text-[13px] w-max min-w-full mx-auto">
                   <thead>
                     <tr className="text-center text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200">
-                      <th className="px-4 py-2.5 whitespace-nowrap">Hour</th>
-                      <th className="px-4 py-2.5 whitespace-nowrap">In (Throughput)</th>
-                      <th className="px-4 py-2.5 whitespace-nowrap">Out (Output)</th>
+                      <th className="px-4 py-2.5 whitespace-nowrap">Time</th>
+                      <th className="px-4 py-2.5 whitespace-nowrap">Rated Speed</th>
+                      <th className="px-4 py-2.5 whitespace-nowrap">Output</th>
+                      <th className="px-4 py-2.5 whitespace-nowrap">OEE</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {shiftSummary.map((entry, i) => (
+                    {productionRows.map((row, i) => (
                       <tr key={i} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                        <td className="px-4 py-3 text-center font-medium text-slate-700 whitespace-nowrap">{formatHourRange(entry.hour)}</td>
-                        <td className="px-4 py-3 text-center font-semibold text-slate-700 whitespace-nowrap">{entry.in.toLocaleString()}</td>
-                        <td className="px-4 py-3 text-center font-semibold text-slate-700 whitespace-nowrap">{entry.out.toLocaleString()}</td>
+                        <td className="px-4 py-3 text-center font-medium text-slate-700 whitespace-nowrap">{row.hour}</td>
+                        <td className="px-4 py-3 text-center font-semibold text-slate-700 whitespace-nowrap">{ratedSpeed > 0 ? ratedSpeed.toLocaleString() : '-'}</td>
+                        <td className="px-4 py-3 text-center font-semibold text-slate-700 whitespace-nowrap">{row.output.toLocaleString()}</td>
+                        <td className="px-4 py-3 text-center font-bold text-slate-700 whitespace-nowrap">
+                          {ratedSpeed > 0 ? `${((row.output / ratedSpeed) * 100).toFixed(2)}%` : '-'}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot>
-                    <tr className="border-t-2 border-slate-300 bg-slate-50">
-                      <td className="px-4 py-3 text-center font-bold text-slate-800 whitespace-nowrap">Total</td>
-                      <td className="px-4 py-3 text-center font-bold text-slate-800 whitespace-nowrap">{totalIn.toLocaleString()}</td>
-                      <td className="px-4 py-3 text-center font-bold text-slate-800 whitespace-nowrap">{totalOut.toLocaleString()}</td>
-                    </tr>
-                  </tfoot>
                 </table>
               </div>
             </div>
@@ -692,15 +693,6 @@ function formatEstFinish(remaining: number, speedPerHour: number, timezone?: str
 
 function pad(n: number): string {
   return n.toString().padStart(2, '0');
-}
-
-function formatHourRange(hour: string): string {
-  const match = hour.match(/^(\d{1,2}):(\d{2})/);
-  if (!match) return hour;
-  const h = parseInt(match[1], 10);
-  const m = match[2];
-  const nextH = (h + 1) % 24;
-  return `${String(h).padStart(2, '0')}:${m} - ${String(nextH).padStart(2, '0')}:${m}`;
 }
 
 function formatStateDuration(runstate: OfsRunState | undefined, lastUpdated: Date | null): string {

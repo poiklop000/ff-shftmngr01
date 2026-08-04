@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Calculator, ClipboardList, Activity, TimerOff, Settings, Calendar, Clock, BarChart3, Shield, LogOut, Database, Loader2, LayoutDashboard, Moon, Sun, Maximize2, Minimize2 } from 'lucide-react';
+import { Calculator, ClipboardList, Activity, TimerOff, Settings, Calendar, Clock, BarChart3, Shield, LogOut, Database, Loader2, Moon, Sun, Maximize2, Minimize2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useTheme } from '@/lib/theme';
-import { DashboardView } from '@/components/DashboardView';
 import { AnalyticsView } from '@/components/AnalyticsView';
 import { CalculatorView } from '@/components/CalculatorView';
 import { DowntimeHistory } from '@/components/DowntimeHistory';
@@ -38,16 +37,16 @@ import { saveMonitoringRecord, loadMonitoringRecord, buildActiveJobSnapshot, typ
 import { fetchOfsStatus } from '@/lib/ofs';
 import { syncAllData } from '@/lib/captureSync';
 
-type View = 'dashboard' | 'calculator' | 'tracker' | 'live' | 'downtime' | 'analytics' | 'admin';
+type View = 'calculator' | 'tracker' | 'live' | 'downtime' | 'analytics' | 'admin';
 const VIEW_KEY = 'canning_calc_view';
-const VALID_VIEWS: View[] = ['dashboard', 'calculator', 'tracker', 'live', 'downtime', 'analytics', 'admin'];
+const VALID_VIEWS: View[] = ['calculator', 'tracker', 'live', 'downtime', 'analytics', 'admin'];
 
 // Pages each role is allowed to open.
 const ROLE_ACCESS: Record<Role, View[]> = {
-  operator: ['dashboard', 'live', 'downtime', 'calculator'],
-  team_lead: ['dashboard', 'live', 'tracker', 'downtime', 'calculator'],
-  manager: ['dashboard', 'live', 'tracker', 'downtime', 'calculator', 'analytics'],
-  admin: ['dashboard', 'live', 'tracker', 'downtime', 'calculator', 'analytics', 'admin'],
+  operator: ['live', 'downtime', 'calculator'],
+  team_lead: ['live', 'tracker', 'downtime', 'calculator'],
+  manager: ['live', 'tracker', 'downtime', 'calculator', 'analytics'],
+  admin: ['live', 'tracker', 'downtime', 'calculator', 'analytics', 'admin'],
 };
 
 // Deep-clone the data for an immutable update, but keep the customHours array
@@ -63,7 +62,7 @@ function cloneData(prev: AppData): AppData {
 export default function App() {
   const [view, setView] = useState<View>(() => {
     const saved = localStorage.getItem(VIEW_KEY) as View | null;
-    return saved && VALID_VIEWS.includes(saved) ? saved : 'dashboard';
+    return saved && VALID_VIEWS.includes(saved) ? saved : 'live';
   });
 
   // Deep links from Teams alert cards (e.g. .../#/analytics) select the matching view.
@@ -592,7 +591,6 @@ function epochToConsoleTime(
   const effectiveView: View = allowedViews.includes(view) ? view : allowedViews[0]!;
 
   const ALL_NAV: { id: View; label: string; Icon: LucideIcon }[] = [
-    { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
     { id: 'live', label: 'Live', Icon: Activity },
     { id: 'tracker', label: 'Monitoring', Icon: ClipboardList },
     { id: 'downtime', label: 'Downtime', Icon: TimerOff },
@@ -788,14 +786,7 @@ function epochToConsoleTime(
       </div>
 
       <div className="sm-container" style={{ paddingTop: 20, paddingBottom: 80 }}>
-        {effectiveView === 'dashboard' ? (
-          <DashboardView
-            date={data.date}
-            currentShift={data.shift}
-            customHours={data.customHours}
-            isAdmin={profile?.role === 'admin'}
-          />
-        ) : effectiveView === 'calculator' ? (
+        {effectiveView === 'calculator' ? (
           <CalculatorView
             calc={calcMemo}
             onChange={handleCalcChange}

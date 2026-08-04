@@ -1322,6 +1322,49 @@ html[data-theme='dark'] .modal-card.report-modal .modal-close-btn {
 }
 html[data-theme='dark'] .modal-card.report-modal .modal-close-btn:hover { background: #e2e8f0; color: #0f172a; }
 
+/* Force the light CSS-variable palette inside the report surface so inline
+   var(--*) colours resolve light even while the app is in dark theme. */
+html[data-theme='dark'] .modal-card.report-modal,
+html[data-theme='dark'] .shift-report {
+  --app-bg: #f8fafc;
+  --app-fg: #1e293b;
+  --card-bg: #ffffff;
+  --card-border: #e2e8f0;
+  --modal-bg: #ffffff;
+  --input-bg: #ffffff;
+  --input-border: #cbd5e1;
+  --input-text: #0f172a;
+  --track-bg: #e2e8f0;
+  --text-muted: #64748b;
+  --text-faint: #475569;
+  --btn-sec-bg: #e2e8f0;
+  --btn-sec-text: #0f172a;
+  --danger-bg: #fef2f2;
+  --danger-border: #fecaca;
+  --danger-text: #b91c1c;
+  --success-bg: #f0fdf4;
+  --success-border: #bbf7d0;
+  --success-text: #166534;
+  --blue-tag-bg: #dbeafe;
+  --blue-tag-border: #bfdbfe;
+  --blue-tag-text: #1e40af;
+  --green-tag-bg: #dcfce7;
+  --green-tag-border: #bbf7d0;
+  --green-tag-text: #166534;
+  --amber-tag-bg: #fef3c7;
+  --amber-tag-border: #fde68a;
+  --amber-tag-text: #92400e;
+  --red-tag-bg: #fee2e2;
+  --red-tag-border: #fecaca;
+  --red-tag-text: #b91c1c;
+  --slate-tag-bg: #f1f5f9;
+  --slate-tag-border: #cbd5e1;
+  --slate-tag-text: #334155;
+  --teal-tag-bg: #f0fdfa;
+  --teal-tag-border: #99f6e4;
+  --teal-tag-text: #115e59;
+}
+
 /* Surfaces inside the report (incl. the downtime timeline) */
 html[data-theme='dark'] .shift-report .bg-white { background-color: #ffffff !important; }
 html[data-theme='dark'] .shift-report .bg-slate-100 { background-color: #f1f5f9 !important; }

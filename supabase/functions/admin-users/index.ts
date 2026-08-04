@@ -1,4 +1,4 @@
-// admin-users — user management endpoint for the Shift Manager Console
+// admin-users — user management endpoint for the Krones Canning Line Console
 //
 // The app authenticates with name + password: usernames are mapped to Supabase
 // Auth email addresses as "<username>@app.local". This edge function performs

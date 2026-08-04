@@ -117,7 +117,7 @@ function buildRecurringIssueMessage(
       { type: "TextBlock", text: "Recurring Issue Detected", weight: "Bolder", size: "Large", color: "Warning" },
       { type: "TextBlock", text: `The same downtime reason has occurred ${count} times in the last hour.`, wrap: true, weight: "Bolder" },
       { type: "FactSet", facts },
-      { type: "TextBlock", text: "— Sent automatically by Free-Flow Shift Manager Console", wrap: true, isSubtle: true, size: "Small" },
+      { type: "TextBlock", text: "— Sent automatically by Krones Canning Line Console", wrap: true, isSubtle: true, size: "Small" },
     ],
   };
 }
@@ -147,7 +147,7 @@ function buildOccurredMessage(evt: DowntimeRow): Record<string, unknown> {
       { type: "TextBlock", text: `Downtime Started — ${lineName}`, weight: "Bolder", size: "Large", color: "Attention" },
       { type: "TextBlock", text: `${style.label} is ONGOING.`, wrap: true, color: style.color, weight: "Bolder" },
       { type: "FactSet", facts },
-      { type: "TextBlock", text: "— Sent automatically by Free-Flow Shift Manager Console", wrap: true, isSubtle: true, size: "Small" },
+      { type: "TextBlock", text: "— Sent automatically by Krones Canning Line Console", wrap: true, isSubtle: true, size: "Small" },
     ],
   };
 }
@@ -178,7 +178,7 @@ function buildResolvedMessage(evt: DowntimeRow): Record<string, unknown> {
       { type: "TextBlock", text: `Downtime Resolved — ${lineName}`, weight: "Bolder", size: "Large", color: "Good" },
       { type: "TextBlock", text: `${style.label} has ENDED.`, wrap: true, color: style.color, weight: "Bolder" },
       { type: "FactSet", facts },
-      { type: "TextBlock", text: "— Sent automatically by Free-Flow Shift Manager Console", wrap: true, isSubtle: true, size: "Small" },
+      { type: "TextBlock", text: "— Sent automatically by Krones Canning Line Console", wrap: true, isSubtle: true, size: "Small" },
     ],
   };
 }

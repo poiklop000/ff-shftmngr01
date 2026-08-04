@@ -1014,10 +1014,12 @@ tbody tr:hover { background-color: #eff6ff; }
   }
 
   /* ---- Print: saved record report (Report button on the Saved Records page) ----
-     Printing uses an isolated hidden iframe that contains only the ShiftReport,
-     so nothing else on this page needs to be suppressed here. The rules below
-     only handle printing while a record modal is open: the modal chrome is
-     stripped and the underlying list is hidden so the report fills the page. */
+     The handler swaps the live DOM: #root is hidden inline and the report is
+     appended to <body> as #print-report-root. These print rules are a fallback
+     for renderers that re-snapshot from the live DOM; the modal chrome rules
+     below handle printing while a record modal is open. */
+  body.printing-saved-report #root { display: none !important; }
+  body.printing-saved-report #print-report-root { display: block !important; }
   .modal-overlay {
     position: static !important;
     inset: auto !important;

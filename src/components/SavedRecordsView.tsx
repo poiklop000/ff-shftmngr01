@@ -79,12 +79,17 @@ export function SavedRecordsView() {
   };
 
   const handlePrintReport = (r: MonitoringRecord) => {
-    // Print from an isolated hidden iframe instead of the live page. On iOS
-    // Safari, window.print() snapshots the current page DOM — if React hasn't
-    // rendered the report yet or the device is rotated, the "Saved Monitoring
-    // Records" list gets printed instead of the report. A dedicated document
-    // that contains only the report can never print the list.
-    const reportHtml = renderToStaticMarkup(
+    // Print by swapping the LIVE document to contain only the report, using
+    // inline styles — never @media print CSS. iOS Safari snapshots the live DOM
+    // for printing, and on device rotation it re-snapshots it; if the report
+    // layout depends on print stylesheets (as .print-only did) iOS drops them
+    // and prints the app page instead. With the app root hidden inline and the
+    // report appended to <body>, every snapshot (any orientation) contains only
+    // the report.
+    document.getElementById('print-report-root')?.remove();
+    const printRoot = document.createElement('div');
+    printRoot.id = 'print-report-root';
+    printRoot.innerHTML = renderToStaticMarkup(
       <ShiftReport
         shift={r.shift_name as Shift}
         date={r.record_date}
@@ -95,39 +100,33 @@ export function SavedRecordsView() {
         downtimeEvents={r.downtime_snapshot ?? []}
       />,
     );
-    const css = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
-      .map((el) => el.outerHTML)
-      .join('\n');
-    const title = `FF_${r.shift_name}${r.record_date ? `_${r.record_date}` : ''}`;
+    document.body.appendChild(printRoot);
 
-    const iframe = document.createElement('iframe');
-    iframe.setAttribute('aria-hidden', 'true');
-    iframe.style.cssText = 'position: fixed; left: -9999px; top: 0; width: 2px; height: 2px; border: 0;';
-    document.body.appendChild(iframe);
-    const doc = iframe.contentDocument;
-    if (!doc) {
-      document.body.removeChild(iframe);
-      return;
-    }
-    doc.open();
-    doc.write(`<!DOCTYPE html><html><head>${css}<title>${title}</title></head><body>${reportHtml}</body></html>`);
-    doc.close();
+    const appRoot = document.getElementById('root');
+    appRoot?.style.setProperty('display', 'none', 'important');
+    document.body.classList.add('printing-saved-report');
+    const originalTitle = document.title;
+    document.title = `FF_${r.shift_name}${r.record_date ? `_${r.record_date}` : ''}`;
 
-    const win = iframe.contentWindow!;
-    let printed = false;
-    const printNow = () => {
-      if (printed) return;
-      printed = true;
-      win.focus();
-      win.print();
+    const restore = () => {
+      document.getElementById('print-report-root')?.remove();
+      appRoot?.style.removeProperty('display');
+      document.body.classList.remove('printing-saved-report');
+      document.title = originalTitle;
+      window.removeEventListener('afterprint', restore);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.clearTimeout(safetyTimer);
     };
-    const cleanup = () => {
-      if (iframe.parentNode) document.body.removeChild(iframe);
+    const onVisibility = () => {
+      // iOS Safari does not reliably fire afterprint; the page becomes visible
+      // again when the print sheet closes, so restore then too.
+      if (document.visibilityState === 'visible') restore();
     };
-    win.addEventListener('load', printNow);
-    win.addEventListener('afterprint', cleanup);
-    window.setTimeout(printNow, 1500);
-    window.setTimeout(cleanup, 90_000);
+    const safetyTimer = window.setTimeout(restore, 30_000);
+
+    window.addEventListener('afterprint', restore);
+    document.addEventListener('visibilitychange', onVisibility);
+    window.setTimeout(() => window.print(), 250);
     setMsg('Report sent to printer');
   };
 

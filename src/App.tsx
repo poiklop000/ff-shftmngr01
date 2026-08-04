@@ -599,16 +599,18 @@ function epochToConsoleTime(
               >
                 <Settings size={22} />
               </button>
-              <button
-                type="button"
-                className="app-bar-settings-btn"
-                onClick={handleSync}
-                aria-label="Sync data from OFS"
-                title="Sync data from OFS"
-                disabled={syncing}
-              >
-                {syncing ? <Loader2 size={22} className="animate-spin" /> : <Database size={22} />}
-              </button>
+              {profile?.role === 'admin' && (
+                <button
+                  type="button"
+                  className="app-bar-settings-btn"
+                  onClick={handleSync}
+                  aria-label="Sync data from OFS"
+                  title="Sync data from OFS"
+                  disabled={syncing}
+                >
+                  {syncing ? <Loader2 size={22} className="animate-spin" /> : <Database size={22} />}
+                </button>
+              )}
             </div>
           </div>
         </div>

@@ -63,6 +63,17 @@ export default function App() {
     const saved = localStorage.getItem(VIEW_KEY) as View | null;
     return saved && VALID_VIEWS.includes(saved) ? saved : 'live';
   });
+
+  // Deep links from Teams alert cards (e.g. .../#/analytics) select the matching view.
+  useEffect(() => {
+    const applyHash = () => {
+      const m = window.location.hash.match(/^#\/(\w+)/);
+      if (m && (VALID_VIEWS as string[]).includes(m[1])) setView(m[1] as View);
+    };
+    applyHash();
+    window.addEventListener('hashchange', applyHash);
+    return () => window.removeEventListener('hashchange', applyHash);
+  }, []);
   const [data, setData] = useState<AppData>(() => loadAppData());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [keyboardOpen, setKeyboardOpen] = useState(false);

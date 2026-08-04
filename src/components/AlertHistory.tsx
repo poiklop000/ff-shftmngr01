@@ -135,7 +135,7 @@ export function AlertHistory() {
           {rows.length === 0 ? 'No alerts have been sent yet. Send a test alert from Settings to verify the pipeline.' : 'No alerts match the current filter.'}
         </div>
       ) : (
-        <div className="card-scroll" style={{ marginTop: 10 }}>
+        <div className="card-scroll" style={{ marginTop: 10, maxHeight: 270 }}>
           <table className="w-full text-[13px]" style={{ minWidth: 720 }}>
             <thead>
               <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-800 border-b border-slate-200">

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { KeyRound, Trash2, Ban, Check, UserPlus, RefreshCw, Shield } from 'lucide-react';
+import { AlertHistory } from '@/components/AlertHistory';
 import {
   adminCreateUser,
   adminDeleteUser,
@@ -374,6 +375,10 @@ export function AdminView({ currentUserId }: AdminViewProps) {
           ))}
         </div>
       )}
+
+      <div style={{ marginTop: 16 }}>
+        <AlertHistory />
+      </div>
     </div>
   );
 }

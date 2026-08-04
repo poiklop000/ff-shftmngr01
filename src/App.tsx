@@ -807,7 +807,7 @@ function epochToConsoleTime(
             customHours={data.customHours}
           />
         ) : effectiveView === 'analytics' ? (
-          <AnalyticsView onOpenRecord={handleOpenRecordFromAnalytics} syncTick={syncTick} isAdmin={profile?.role === 'admin'} />
+          <AnalyticsView onOpenRecord={handleOpenRecordFromAnalytics} syncTick={syncTick} />
         ) : effectiveView === 'admin' ? (
           <AdminView currentUserId={currentUserId} />
         ) : (

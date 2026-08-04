@@ -3,7 +3,6 @@ import { BarChart3, Loader2, FileDown, ExternalLink, RefreshCw, Calendar, Clock,
 import { PageHelp } from '@/components/PageHelp';
 import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
 import { ShiftReport } from '@/components/ShiftReport';
-import { AlertHistory } from '@/components/AlertHistory';
 import { getActiveHours, type Shift } from '@/types';
 import { fetchDowntimeBetween, formatDuration, localDateTimeToEpoch, type DowntimeComment, type DowntimeEvent } from '@/lib/downtime';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
@@ -125,10 +124,9 @@ function barColor(i: number): string {
 interface AnalyticsViewProps {
   onOpenRecord: (recordDate: string, shift: Shift) => Promise<void>;
   syncTick?: number;
-  isAdmin?: boolean;
 }
 
-export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: AnalyticsViewProps) {
+export function AnalyticsView({ onOpenRecord, syncTick = 0 }: AnalyticsViewProps) {
   const [persisted] = useState(() => loadAnalyticsPersist());
   const [startAt, setStartAt] = useState(persisted.startAt);
   const [endAt, setEndAt] = useState(persisted.endAt);
@@ -440,8 +438,6 @@ export function AnalyticsView({ onOpenRecord, syncTick = 0, isAdmin = false }: A
           },
         ]}
       />
-
-      {isAdmin && <AlertHistory />}
 
       <div className="card card-blue">
         <h3 style={{ margin: 0, border: 'none', padding: 0, borderBottom: '1px solid currentColor', paddingBottom: 6 }}>

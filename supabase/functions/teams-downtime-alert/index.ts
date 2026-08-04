@@ -13,6 +13,8 @@
 // Designed to run on a schedule (every minute via pg_cron).
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+const CONSOLE_URL = "https://poiklop000.github.io/ff-shftmngr01/#/analytics";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -33,6 +35,7 @@ interface DowntimeRow {
   end_epoch: number | null;
   alert_sent: boolean | null;
   resolved_alert_sent: boolean | null;
+  last_escalation_minutes: number | null;
 }
 
 function getSupabase() {
@@ -67,6 +70,57 @@ function formatEpochLocal(epoch: number): string {
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
   const ms = String(epoch % 1000).padStart(3, "0");
   return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}:${get("second")}.${ms}`;
+}
+
+interface JobContext {
+  product: string | null;
+  orderName: string | null;
+  ratePerHour: number | null;
+}
+
+function formatNumber(n: number): string {
+  return n.toLocaleString("en-NZ");
+}
+
+// Estimated cans not produced while the line is down: duration x rated speed.
+function computeCansLost(durationMs: number, ratePerHour: number): number {
+  return Math.round((durationMs / 3_600_000) * ratePerHour);
+}
+
+// Find the active job snapshot captured just before the event started, so
+// alerts can show which product was running and the rated line speed.
+async function findJobContext(
+  supabase: ReturnType<typeof getSupabase>,
+  startEpoch: number,
+): Promise<JobContext | null> {
+  const { data } = await supabase
+    .from("job_snapshots")
+    .select("product_name, order_name, sku, rated_speed")
+    .not("job_id", "is", null)
+    .lte("capture_time", new Date(startEpoch).toISOString())
+    .order("capture_time", { ascending: false })
+    .limit(1);
+  const row = data?.[0] as
+    | { product_name?: string | null; order_name?: string | null; rated_speed?: number | null }
+    | undefined;
+  if (!row) return null;
+  return {
+    product: row.product_name ?? null,
+    orderName: row.order_name ?? null,
+    ratePerHour: typeof row.rated_speed === "number" ? row.rated_speed : null,
+  };
+}
+
+function productFact(ctx: JobContext | null): { title: string; value: string } | null {
+  if (ctx?.orderName) return { title: "Product:", value: ctx.orderName };
+  if (ctx?.product) return { title: "Product:", value: ctx.product };
+  return null;
+}
+
+function impactFact(durationMs: number, ctx: JobContext | null, ratePerHour: number | null): { title: string; value: string } | null {
+  const rate = ctx?.ratePerHour ?? ratePerHour;
+  if (!rate || rate <= 0) return null;
+  return { title: "Est. cans lost:", value: formatNumber(computeCansLost(durationMs, rate)) };
 }
 
 // Color-code alerts by downtime type so they are visually distinguishable in Teams.
@@ -119,10 +173,17 @@ function buildRecurringIssueMessage(
       { type: "FactSet", facts },
       { type: "TextBlock", text: "— Sent automatically by Krones Canning Line Console", wrap: true, isSubtle: true, size: "Small" },
     ],
+    actions: [
+      { type: "Action.OpenUrl", title: "View in Console", url: CONSOLE_URL },
+    ],
   };
 }
 
-function buildOccurredMessage(evt: DowntimeRow): Record<string, unknown> {
+function buildOccurredMessage(
+  evt: DowntimeRow,
+  ctx: JobContext | null,
+  ratePerHour: number | null,
+): Record<string, unknown> {
   const nowMs = Date.now();
   const durationMs = evt.duration_ms ?? (nowMs - evt.start_epoch);
   const lineName = evt.console_name ?? "Production Line";
@@ -135,9 +196,13 @@ function buildOccurredMessage(evt: DowntimeRow): Record<string, unknown> {
     { title: "Type:", value: style.label },
     { title: "Reason:", value: reason },
     { title: "Category:", value: category },
-    { title: "Duration so far:", value: formatDuration(durationMs) },
-    { title: "Started:", value: startTime },
   ];
+  const product = productFact(ctx);
+  if (product) facts.push(product);
+  facts.push({ title: "Duration so far:", value: formatDuration(durationMs) });
+  const impact = impactFact(durationMs, ctx, ratePerHour);
+  if (impact) facts.push(impact);
+  facts.push({ title: "Started:", value: startTime });
   if (evt.crew_name) facts.push({ title: "Crew:", value: evt.crew_name });
 
   return {
@@ -149,10 +214,17 @@ function buildOccurredMessage(evt: DowntimeRow): Record<string, unknown> {
       { type: "FactSet", facts },
       { type: "TextBlock", text: "— Sent automatically by Krones Canning Line Console", wrap: true, isSubtle: true, size: "Small" },
     ],
+    actions: [
+      { type: "Action.OpenUrl", title: "View in Console", url: CONSOLE_URL },
+    ],
   };
 }
 
-function buildResolvedMessage(evt: DowntimeRow): Record<string, unknown> {
+function buildResolvedMessage(
+  evt: DowntimeRow,
+  ctx: JobContext | null,
+  ratePerHour: number | null,
+): Record<string, unknown> {
   const durationMs = evt.duration_ms ?? (evt.end_epoch ? evt.end_epoch - evt.start_epoch : 0);
   const lineName = evt.console_name ?? "Production Line";
   const style = typeStyle(evt.downtime_type);
@@ -165,10 +237,14 @@ function buildResolvedMessage(evt: DowntimeRow): Record<string, unknown> {
     { title: "Type:", value: style.label },
     { title: "Reason:", value: reason },
     { title: "Category:", value: category },
-    { title: "Total duration:", value: formatDuration(durationMs) },
-    { title: "Started:", value: startTime },
-    { title: "Ended:", value: endTime },
   ];
+  const product = productFact(ctx);
+  if (product) facts.push(product);
+  facts.push({ title: "Total duration:", value: formatDuration(durationMs) });
+  const impact = impactFact(durationMs, ctx, ratePerHour);
+  if (impact) facts.push(impact);
+  facts.push({ title: "Started:", value: startTime });
+  facts.push({ title: "Ended:", value: endTime });
   if (evt.crew_name) facts.push({ title: "Crew:", value: evt.crew_name });
 
   return {
@@ -179,6 +255,51 @@ function buildResolvedMessage(evt: DowntimeRow): Record<string, unknown> {
       { type: "TextBlock", text: `${style.label} has ENDED.`, wrap: true, color: style.color, weight: "Bolder" },
       { type: "FactSet", facts },
       { type: "TextBlock", text: "— Sent automatically by Krones Canning Line Console", wrap: true, isSubtle: true, size: "Small" },
+    ],
+    actions: [
+      { type: "Action.OpenUrl", title: "View in Console", url: CONSOLE_URL },
+    ],
+  };
+}
+
+function buildEscalationMessage(
+  evt: DowntimeRow,
+  ctx: JobContext | null,
+  ratePerHour: number | null,
+  thresholdMinutes: number,
+): Record<string, unknown> {
+  const nowMs = Date.now();
+  const durationMs = evt.duration_ms ?? (nowMs - evt.start_epoch);
+  const lineName = evt.console_name ?? "Production Line";
+  const style = typeStyle(evt.downtime_type);
+  const reason = evt.reason ?? "No reason recorded";
+  const category = evt.category ?? "Uncategorised";
+  const startTime = evt.start_text ?? formatEpochLocal(evt.start_epoch);
+
+  const facts: { title: string; value: string }[] = [
+    { title: "Type:", value: style.label },
+    { title: "Reason:", value: reason },
+    { title: "Category:", value: category },
+  ];
+  const product = productFact(ctx);
+  if (product) facts.push(product);
+  facts.push({ title: "Duration so far:", value: formatDuration(durationMs) });
+  const impact = impactFact(durationMs, ctx, ratePerHour);
+  if (impact) facts.push(impact);
+  facts.push({ title: "Started:", value: startTime });
+  if (evt.crew_name) facts.push({ title: "Crew:", value: evt.crew_name });
+
+  return {
+    type: "AdaptiveCard",
+    version: "1.2",
+    body: [
+      { type: "TextBlock", text: `Downtime Still Ongoing — ${lineName}`, weight: "Bolder", size: "Large", color: "Attention" },
+      { type: "TextBlock", text: `${style.label} has now exceeded ${thresholdMinutes} minutes.`, wrap: true, color: style.color, weight: "Bolder" },
+      { type: "FactSet", facts },
+      { type: "TextBlock", text: "— Sent automatically by Krones Canning Line Console", wrap: true, isSubtle: true, size: "Small" },
+    ],
+    actions: [
+      { type: "Action.OpenUrl", title: "View in Console", url: CONSOLE_URL },
     ],
   };
 }
@@ -271,6 +392,29 @@ Deno.serve(async (req: Request) => {
       return Number.isFinite(n) && n >= 2 ? Math.floor(n) : 5;
     })();
 
+    const { data: escalationRow } = await supabase
+      .from("app_config")
+      .select("value")
+      .eq("key", "teams_alert_escalation_minutes")
+      .maybeSingle();
+    const escalationMinutes = (() => {
+      const levels = (escalationRow?.value ?? "30,60,120")
+        .split(",")
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      return levels.length > 0 ? [...levels].sort((a, b) => a - b) : [30, 60, 120];
+    })();
+
+    const { data: defaultRateRow } = await supabase
+      .from("app_config")
+      .select("value")
+      .eq("key", "teams_default_cans_per_hour")
+      .maybeSingle();
+    const defaultRatePerHour = (() => {
+      const n = Number(defaultRateRow?.value);
+      return Number.isFinite(n) && n > 0 ? n : 24000;
+    })();
+
     if (!webhookUrl || !enabled) {
       console.log(
         `[teams-downtime-alert] ${new Date().toISOString()} skipped — webhook: ${!!webhookUrl}, enabled: ${enabled}`,
@@ -288,8 +432,8 @@ Deno.serve(async (req: Request) => {
     //     AND total duration >= threshold
     const { data: events, error } = await supabase
       .from("downtime_events")
-      .select("id, console_name, downtime_type, reason, category, start_epoch, duration_ms, start_text, crew_name, resolved, end_epoch, alert_sent, resolved_alert_sent")
-      .or(`and(alert_sent.eq.false,resolved.eq.false),and(resolved_alert_sent.eq.false,resolved.eq.true,end_epoch.gte.${recentEndCutoffMs})`)
+      .select("id, console_name, downtime_type, reason, category, start_epoch, duration_ms, start_text, crew_name, resolved, end_epoch, alert_sent, resolved_alert_sent, last_escalation_minutes")
+      .or(`and(alert_sent.eq.false,resolved.eq.false),and(alert_sent.eq.true,resolved.eq.false),and(resolved_alert_sent.eq.false,resolved.eq.true,end_epoch.gte.${recentEndCutoffMs})`)
       .order("start_epoch", { ascending: false });
 
     if (error) throw new Error(error.message);
@@ -301,6 +445,7 @@ Deno.serve(async (req: Request) => {
 
     let occurredCount = 0;
     let resolvedCount = 0;
+    let escalationCount = 0;
     let skippedCount = 0;
     const failed: number[] = [];
 
@@ -318,19 +463,29 @@ Deno.serve(async (req: Request) => {
         ? (evt.duration_ms ?? (evt.end_epoch ? evt.end_epoch - evt.start_epoch : 0))
         : (nowMs - evt.start_epoch);
 
-      if (effectiveDurationMs < thresholdMs) {
-        skippedCount++;
-        continue;
-      }
+      // Job context (product + rated speed) + fallback can rate
+      const ctx = await findJobContext(supabase, evt.start_epoch);
+      const ratePerHour = ctx?.ratePerHour ?? defaultRatePerHour;
 
-      // Send the appropriate alert(s)
       if (needsOccurred) {
-        const payload = buildOccurredMessage(evt);
+        if (effectiveDurationMs < thresholdMs) {
+          skippedCount++;
+          continue;
+        }
+        const payload = buildOccurredMessage(evt, ctx, ratePerHour);
         const sent = await sendTeams(webhookUrl, payload);
         if (sent) {
+          // If the event is already past an escalation level, record the highest
+          // one so a duplicate "still ongoing" alert isn't sent immediately.
+          const crossed = escalationMinutes.filter((m) => effectiveDurationMs >= m * 60_000);
+          const lastEscalation = crossed.length > 0 ? Math.max(...crossed) : null;
           await supabase
             .from("downtime_events")
-            .update({ alert_sent: true, updated_at: new Date().toISOString() })
+            .update({
+              alert_sent: true,
+              last_escalation_minutes: lastEscalation,
+              updated_at: new Date().toISOString(),
+            })
             .eq("id", evt.id);
           occurredCount++;
         } else {
@@ -339,7 +494,11 @@ Deno.serve(async (req: Request) => {
       }
 
       if (needsResolved) {
-        const payload = buildResolvedMessage(evt);
+        if (effectiveDurationMs < thresholdMs) {
+          skippedCount++;
+          continue;
+        }
+        const payload = buildResolvedMessage(evt, ctx, ratePerHour);
         const sent = await sendTeams(webhookUrl, payload);
         if (sent) {
           await supabase
@@ -349,6 +508,27 @@ Deno.serve(async (req: Request) => {
           resolvedCount++;
         } else {
           failed.push(evt.id);
+        }
+      }
+
+      // Escalation: ongoing event that already fired its initial alert and has
+      // now crossed the next escalation threshold.
+      if (!evt.resolved && evt.alert_sent) {
+        for (const m of escalationMinutes) {
+          if (effectiveDurationMs >= m * 60_000 && (evt.last_escalation_minutes ?? 0) < m) {
+            const payload = buildEscalationMessage(evt, ctx, ratePerHour, m);
+            const sent = await sendTeams(webhookUrl, payload);
+            if (sent) {
+              await supabase
+                .from("downtime_events")
+                .update({ last_escalation_minutes: m, updated_at: new Date().toISOString() })
+                .eq("id", evt.id);
+              escalationCount++;
+            } else {
+              failed.push(evt.id);
+            }
+            break;
+          }
         }
       }
     }
@@ -447,11 +627,11 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const totalAlerted = occurredCount + resolvedCount + recurringCount;
+    const totalAlerted = occurredCount + resolvedCount + escalationCount + recurringCount;
     console.log(
-      `[teams-downtime-alert] ${new Date().toISOString()} occurred=${occurredCount} resolved=${resolvedCount} recurring=${recurringCount} skipped=${skippedCount} failed=${failed.length}`,
+      `[teams-downtime-alert] ${new Date().toISOString()} occurred=${occurredCount} resolved=${resolvedCount} escalation=${escalationCount} recurring=${recurringCount} skipped=${skippedCount} failed=${failed.length}`,
     );
-    return json({ ok: true, alerted: totalAlerted, occurred: occurredCount, resolved: resolvedCount, recurring: recurringCount, skipped: skippedCount, failed });
+    return json({ ok: true, alerted: totalAlerted, occurred: occurredCount, resolved: resolvedCount, escalation: escalationCount, recurring: recurringCount, skipped: skippedCount, failed });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error(`[teams-downtime-alert] ${new Date().toISOString()} error:`, message);

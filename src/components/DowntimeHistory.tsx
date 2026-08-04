@@ -342,7 +342,7 @@ function CommentList({ comments }: { comments: DowntimeComment[] }) {
                 minute: '2-digit',
               })}
             </span>
-            <p className="m-0 mt-0.5 text-slate-600">{c.text}</p>
+            <p className="m-0 mt-0.5 text-slate-700">{c.text}</p>
           </div>
         </div>
       ))}

@@ -1179,6 +1179,7 @@ html[data-theme='dark'] .bg-white\/70 { background-color: rgba(17, 26, 46, 0.7) 
 html[data-theme='dark'] .bg-slate-50 { background-color: #0f172a !important; }
 html[data-theme='dark'] .bg-slate-100 { background-color: #1e293b !important; }
 html[data-theme='dark'] .bg-slate-200 { background-color: #293548 !important; }
+html[data-theme='dark'] .bg-slate-50\/50 { background-color: rgba(30, 41, 59, 0.6) !important; }
 html[data-theme='dark'] .text-slate-400 { color: #94a3b8 !important; }
 html[data-theme='dark'] .text-slate-500 { color: #94a3b8 !important; }
 html[data-theme='dark'] .text-slate-600 { color: #94a3b8 !important; }

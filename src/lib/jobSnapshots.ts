@@ -19,10 +19,9 @@ export interface JobSnapshot {
 
 /**
  * Fetches job snapshots from the database for a given date and shift window.
- * Groups them by job_id and returns one line per distinct job, showing the
- * product name:
- *   "Job 1 — P-284"
- *   "Job 2 — P-285"
+ * Groups them by job_id and returns one product name per distinct job, e.g.
+ *   "P-284"
+ *   "P-285"
  *
  * Only jobs that were actually running during the shift's exact hours are
  * shown (e.g. the Morning shift 06:00-18:00 does not include jobs from the
@@ -71,7 +70,7 @@ export async function fetchJobsForShift(
   if (error) throw new Error(error.message);
   if (!data || data.length === 0) return [];
 
-  const jobLines: string[] = [];
+  const productLines: string[] = [];
   const seenJobIds = new Set<number>();
 
   for (const row of data as JobSnapshot[]) {
@@ -80,9 +79,10 @@ export async function fetchJobsForShift(
     if (seenJobIds.has(jid)) continue;
     seenJobIds.add(jid);
 
-    const product = row.order_name ?? row.product_name ?? `Job ${jid}`;
-    jobLines.push(`Job ${jobLines.length + 1}\n${product}`);
+    const product = row.order_name ?? row.product_name ?? row.sku ?? '';
+    if (!product.trim()) continue;
+    productLines.push(product.trim());
   }
 
-  return jobLines;
+  return productLines;
 }

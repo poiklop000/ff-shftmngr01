@@ -66,17 +66,13 @@ export function ShiftReport({ shift, date, hours, boardData, notes, sku, downtim
     };
   }, [rows, rowCount]);
 
-  // The SKU field stores one job per two lines: "Job 1\nProduct A\nJob 2\nProduct B".
-  const skuJobs = (() => {
-    const lines = (sku || '').split('\n');
-    const jobs: { label: string; product: string }[] = [];
-    for (let i = 0; i < lines.length; i += 2) {
-      const label = (lines[i] ?? '').trim();
-      const product = (lines[i + 1] ?? '').trim();
-      if (!label && !product) continue;
-      jobs.push({ label, product });
-    }
-    return jobs;
+  // The SKU field stores one product name per line. Legacy records also contain
+  // "Job N" label lines interleaved with products — those are skipped.
+  const skuProducts = (() => {
+    return (sku || '')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !/^Job\s+\d+$/i.test(l));
   })();
 
   return (
@@ -90,17 +86,12 @@ export function ShiftReport({ shift, date, hours, boardData, notes, sku, downtim
             <Package size={13} />
             SKUs:
           </label>
-          {skuJobs.length > 0 ? (
+          {skuProducts.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {skuJobs.map((job, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--blue-tag-text)', backgroundColor: 'var(--blue-tag-bg)', border: '1px solid var(--blue-tag-border)', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>
-                    {job.label}
-                  </span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--app-fg)', lineHeight: 1.4 }}>
-                    {job.product}
-                  </span>
-                </div>
+              {skuProducts.map((product, i) => (
+                <span key={i} style={{ fontSize: 13, fontWeight: 600, color: 'var(--app-fg)', lineHeight: 1.4 }}>
+                  {product}
+                </span>
               ))}
             </div>
           ) : (

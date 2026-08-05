@@ -74,10 +74,21 @@ export async function fetchProfile(userId: string): Promise<AppProfile | null> {
   return (data as AppProfile | null) ?? null;
 }
 
-async function callAdmin<T>(payload: Record<string, unknown>): Promise<T> {
+// Returns a fresh access token for raw edge-function calls. getUser() asks the
+// Auth server to validate the session and refreshes the access token when it
+// has expired (the ~1h JWT lifetime), so these calls never send a stale token
+// the way getSession() alone would after expiry.
+export async function getFreshAccessToken(): Promise<string> {
+  const { error } = await supabase.auth.getUser();
+  if (error) throw new Error('Not signed in.');
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData.session?.access_token;
   if (!token) throw new Error('Not signed in.');
+  return token;
+}
+
+async function callAdmin<T>(payload: Record<string, unknown>): Promise<T> {
+  const token = await getFreshAccessToken();
   const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-users`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

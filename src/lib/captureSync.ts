@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { getFreshAccessToken } from '@/lib/auth';
 
 const SYNC_ENDPOINTS = [
   { name: 'downtime', slug: 'sync-spans-history' },
@@ -19,9 +19,7 @@ export interface SyncOutcome {
 }
 
 export async function syncAllData(): Promise<SyncOutcome> {
-  const { data: sessionData } = await supabase.auth.getSession();
-  const token = sessionData.session?.access_token;
-  if (!token) throw new Error('Not signed in.');
+  const token = await getFreshAccessToken();
 
   const base = import.meta.env.VITE_SUPABASE_URL;
   const results = await Promise.all(

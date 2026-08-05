@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { KeyRound, Trash2, Ban, Check, UserPlus, RefreshCw, Shield, Search, Users, BellRing, Database, History, Loader2 } from 'lucide-react';
+import { KeyRound, Trash2, Ban, Check, UserPlus, RefreshCw, Shield, Search, Users, BellRing, Database, History, Loader2, MonitorPlay } from 'lucide-react';
 import { AlertHistory } from '@/components/AlertHistory';
 import { AlertsConfig } from '@/components/AlertsConfig';
+import { BoardConfig } from '@/components/BoardConfig';
 import { OfsKillSwitch } from '@/components/OfsKillSwitch';
 import { ACCESSIBLE_PAGE_OPTIONS, roleDefaultPages, userAllowedViews, type View } from '@/lib/access';
 import {
@@ -23,7 +24,7 @@ interface AdminViewProps {
   onSync?: () => void;
 }
 
-type AdminTab = 'users' | 'alerts' | 'sync' | 'history';
+type AdminTab = 'users' | 'alerts' | 'board' | 'sync' | 'history';
 
 const ROLE_OPTIONS: { value: Role; label: string }[] = [
   { value: 'operator', label: 'Operator' },
@@ -46,6 +47,7 @@ const PAGE_LABELS: Record<string, string> = Object.fromEntries(
 const TABS: { id: AdminTab; label: string; Icon: typeof Users }[] = [
   { id: 'users', label: 'Users & Access', Icon: Users },
   { id: 'alerts', label: 'Alerts & Refresh', Icon: BellRing },
+  { id: 'board', label: 'Board Display', Icon: MonitorPlay },
   { id: 'sync', label: 'Sync Data', Icon: Database },
   { id: 'history', label: 'Alert History', Icon: History },
 ];
@@ -287,7 +289,8 @@ export function AdminView({ currentUserId, syncing = false, syncMessage, syncErr
         </div>
         <div style={{ fontSize: 12, color: 'var(--blue-tag-text)', marginTop: 6, lineHeight: 1.5 }}>
           Manage accounts and which pages each user can open, configure Microsoft Teams alerts and
-          refresh intervals, pull the latest data from OFS, and review alert history. Only admins can see this page.
+          refresh intervals, control the big-screen Board, pull the latest data from OFS, and review alert
+          history. Only admins can see this page.
         </div>
       </div>
 
@@ -541,6 +544,8 @@ export function AdminView({ currentUserId, syncing = false, syncMessage, syncErr
       )}
 
       {tab === 'alerts' && <AlertsConfig />}
+
+      {tab === 'board' && <BoardConfig />}
 
       {tab === 'sync' && (
         <div className="card" style={{ background: 'var(--card-bg)' }}>

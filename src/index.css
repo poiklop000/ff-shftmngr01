@@ -37,6 +37,11 @@ html {
   right: 0;
   top: 50%;
   transform: translateY(-50%);
+  /* The transform above creates a stacking context, which otherwise traps the
+     dropdown's z-index. Lift the whole menu group above page/board content
+     (but below the modal overlay) so the dropdown is never hidden behind a
+     card on the board page. */
+  z-index: 80;
 }
 .app-bar-menu-btn {
   display: inline-flex;
@@ -481,6 +486,67 @@ html {
   margin: 0 auto;
   padding: 0 15px;
   box-sizing: border-box;
+}
+
+/* Big-screen operations board: wider than the regular pages so the 35/65
+   live-status + data layout fits on a single TV screen. */
+.board-container {
+  max-width: 1800px;
+  margin: 0 auto;
+  padding: 0 15px;
+  box-sizing: border-box;
+}
+
+/* Board (big-screen) mode: slim the top bar and make the content area fill
+   the whole viewport so the board fits a fullscreen display. The table is full
+   width (only half the shift's rows show at a time) and uses its normal, large
+   fonts so everything is easy to read from a distance. */
+.app-bar-board {
+  padding: 8px 15px;
+  font-size: 13px;
+  line-height: 1.3;
+}
+.app-bar-board .app-bar-title {
+  padding: 0 48px;
+}
+.app-bar-board .app-bar-menu-btn {
+  width: 30px;
+  height: 30px;
+}
+.board-container.board-mode {
+  height: calc(100vh - 50px);
+  padding: 6px 15px 8px 15px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.board-nav-hidden {
+  padding-bottom: 8px;
+}
+/* On the board the monitoring table must fit its width without horizontal
+   scrolling, so pin it to the container width and let the columns and their
+   inputs scale to match. Fonts stay at their normal size for large screens. */
+.board-mode .table-wrapper {
+  overflow-x: hidden;
+}
+.board-mode .table-wrapper table {
+  min-width: 0;
+  width: 100%;
+  table-layout: fixed;
+}
+.board-mode .table-wrapper td:first-child {
+  white-space: normal !important;
+}
+.board-mode .table-wrapper .table-input,
+.board-mode .table-wrapper .table-text-area {
+  width: 100%;
+}
+/* Shift Timeline keeps its normal height (nothing compacted) so the card stays
+   the same size between refreshes and nothing shifts around. Board-tuned: the
+   status tiles above are capped at 90% height, and this card gets the freed
+   10% so the timeline reads a bit larger from a distance. */
+.board-mode .board-timeline .card {
+  min-height: 165px;
 }
 
 /* ---- Cards ---- */

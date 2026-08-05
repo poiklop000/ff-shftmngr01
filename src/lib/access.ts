@@ -1,11 +1,12 @@
 import type { Role } from '@/lib/auth';
 
-export type View = 'calculator' | 'tracker' | 'live' | 'downtime' | 'analytics' | 'saved-records' | 'admin';
+export type View = 'calculator' | 'tracker' | 'live' | 'board' | 'downtime' | 'analytics' | 'saved-records' | 'admin';
 
 export const VALID_VIEWS: View[] = [
   'calculator',
   'tracker',
   'live',
+  'board',
   'downtime',
   'analytics',
   'saved-records',
@@ -15,16 +16,17 @@ export const VALID_VIEWS: View[] = [
 // Pages each role is allowed to open by default. Per-user overrides live in
 // profiles.page_access and are resolved by userAllowedViews().
 export const ROLE_ACCESS: Record<Role, View[]> = {
-  operator: ['live', 'downtime', 'calculator'],
-  team_lead: ['live', 'tracker', 'downtime', 'calculator', 'saved-records'],
-  manager: ['live', 'tracker', 'downtime', 'calculator', 'analytics', 'saved-records'],
-  admin: ['live', 'tracker', 'downtime', 'calculator', 'analytics', 'saved-records', 'admin'],
+  operator: ['live', 'board', 'downtime', 'calculator'],
+  team_lead: ['live', 'board', 'tracker', 'downtime', 'calculator', 'saved-records'],
+  manager: ['live', 'board', 'tracker', 'downtime', 'calculator', 'analytics', 'saved-records'],
+  admin: ['live', 'board', 'tracker', 'downtime', 'calculator', 'analytics', 'saved-records', 'admin'],
 };
 
 // Page options shown on the Admin page's access editor. The Admin page itself
 // is always admin-only and can never be granted to other roles.
 export const ACCESSIBLE_PAGE_OPTIONS: { id: View; label: string }[] = [
   { id: 'live', label: 'Live' },
+  { id: 'board', label: 'Board' },
   { id: 'tracker', label: 'Monitoring' },
   { id: 'downtime', label: 'Downtime' },
   { id: 'calculator', label: 'Calculator' },

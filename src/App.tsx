@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Calculator, ClipboardList, Activity, TimerOff, Settings, Calendar, Clock, BarChart3, Shield, LogOut, Database, Moon, Sun, Maximize2, Minimize2, MoreVertical } from 'lucide-react';
+import { Calculator, ClipboardList, Activity, MonitorPlay, TimerOff, Settings, Calendar, Clock, BarChart3, Shield, LogOut, Database, Moon, Sun, Maximize2, Minimize2, MoreVertical } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useTheme } from '@/lib/theme';
 import { AnalyticsView } from '@/components/AnalyticsView';
+import { BoardView } from '@/components/BoardView';
 import { CalculatorView } from '@/components/CalculatorView';
 import { DowntimeHistory } from '@/components/DowntimeHistory';
 import { LiveLineStatus } from '@/components/LiveLineStatus';
@@ -39,6 +40,7 @@ import { fetchDowntimeForShift, type DowntimeEvent } from '@/lib/downtime';
 import { saveMonitoringRecord, loadMonitoringRecord, buildActiveJobSnapshot, type ActiveJobSnapshot } from '@/lib/monitoring';
 import { fetchOfsStatus } from '@/lib/ofs';
 import { syncAllData } from '@/lib/captureSync';
+import { loadBoardConfig } from '@/lib/boardConfig';
 
 const VIEW_KEY = 'canning_calc_view';
 
@@ -119,6 +121,44 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [session, setSession] = useState<Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session']>(null);
   const [profile, setProfile] = useState<AppProfile | null>(null);
+  const [navAutoHidden, setNavAutoHidden] = useState(false);
+
+  // Shared Board display settings from app_config: whether the Board page is
+  // shown at all, and how long each view stays before rotating.
+  const [boardEnabled, setBoardEnabled] = useState(true);
+  const [boardTransitionMs, setBoardTransitionMs] = useState(20000);
+
+  // Which view is actually shown (falls back to the first allowed one). Kept
+  // here, before the login gate, so the Board layout and its nav auto-hide can
+  // react to it without running hooks conditionally.
+  const allowedViews = profile ? userAllowedViews(profile) : ROLE_ACCESS.operator;
+  // The Board can be switched off globally from the Admin page; when it is, it
+  // disappears from navigation and is never shown.
+  const availableViews: View[] = boardEnabled ? allowedViews : allowedViews.filter((v) => v !== 'board');
+  const effectiveView: View = availableViews.includes(view) ? view : (availableViews[0] ?? 'tracker');
+  const isBoard = effectiveView === 'board';
+
+  // On the big-screen Board, auto-hide the bottom navigation while idle so the
+  // board stays clean; bring it back on any pointer/key interaction.
+  useEffect(() => {
+    if (!isBoard) {
+      setNavAutoHidden(false);
+      return;
+    }
+    let timer: number | undefined;
+    const wake = () => {
+      setNavAutoHidden(false);
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => setNavAutoHidden(true), 4000);
+    };
+    const events: Array<'pointermove' | 'pointerdown' | 'touchstart' | 'keydown'> = ['pointermove', 'pointerdown', 'touchstart', 'keydown'];
+    events.forEach((ev) => window.addEventListener(ev, wake, { passive: true }));
+    wake();
+    return () => {
+      if (timer) window.clearTimeout(timer);
+      events.forEach((ev) => window.removeEventListener(ev, wake));
+    };
+  }, [isBoard]);
 
   // Restore the persisted auth session and keep it in sync with Supabase.
   // Sessions persist in localStorage, so users stay signed in across visits.
@@ -151,6 +191,21 @@ export default function App() {
       sub.subscription.unsubscribe();
     };
   }, []);
+
+  // Pull the shared Board display settings once signed in, so a change made in
+  // Admin applies to every device (including the big-screen console).
+  useEffect(() => {
+    if (!session) return;
+    let mounted = true;
+    loadBoardConfig()
+      .then((cfg) => {
+        if (!mounted) return;
+        setBoardEnabled(cfg.enabled);
+        setBoardTransitionMs(cfg.transitionMs);
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, [session]);
 
   // Close the header menu when clicking outside it or pressing Escape.
   useEffect(() => {
@@ -577,11 +632,10 @@ function epochToConsoleTime(
   }
 
   const currentUserId = session.user.id;
-  const allowedViews = profile ? userAllowedViews(profile) : ROLE_ACCESS.operator;
-  const effectiveView: View = allowedViews.includes(view) ? view : allowedViews[0]!;
 
   const ALL_NAV: { id: View; label: string; Icon: LucideIcon }[] = [
     { id: 'live', label: 'Live', Icon: Activity },
+    { id: 'board', label: 'Board', Icon: MonitorPlay },
     { id: 'tracker', label: 'Monitoring', Icon: ClipboardList },
     { id: 'downtime', label: 'Downtime', Icon: TimerOff },
     { id: 'calculator', label: 'Calculator', Icon: Calculator },
@@ -589,13 +643,19 @@ function epochToConsoleTime(
     { id: 'saved-records', label: 'Saved Records', Icon: Database },
     { id: 'admin', label: 'Admin', Icon: Shield },
   ];
-  const navItems = ALL_NAV.filter((n) => allowedViews.includes(n.id));
+  const navItems = ALL_NAV.filter((n) => availableViews.includes(n.id));
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: 'var(--app-bg, #f8fafc)', color: 'var(--app-fg, #1e293b)' }}>
-      <div className="app-bar">
+      <div className={`app-bar${isBoard ? ' app-bar-board' : ''}`}>
         <div className="app-bar-inner">
-          <span className="app-bar-title">Free-Flow Manufacturing<br />Krones Canning Line Console</span>
+          <span className="app-bar-title">
+            {isBoard ? (
+              'Free-Flow Manufacturing · Krones Canning Line Console'
+            ) : (
+              <>Free-Flow Manufacturing<br />Krones Canning Line Console</>
+            )}
+          </span>
           <div className="app-bar-menu" ref={menuRef}>
             <button
               type="button"
@@ -658,34 +718,36 @@ function epochToConsoleTime(
           </div>
         </div>
 
-        <div className="app-bar-controls no-print">
-          <div className="app-bar-ctrl-group">
-            <Calendar size={14} className="text-white/80" />
-            <span className="app-bar-ctrl-label">Date</span>
-            <input
-              type="date"
-              className="app-bar-date-input"
-              value={data.date || ''}
-              max={todayStr()}
-              onChange={(e) => handleMetaChange(data.shift, 'date', e.target.value)}
-            />
+        {!isBoard && (
+          <div className="app-bar-controls no-print">
+            <div className="app-bar-ctrl-group">
+              <Calendar size={14} className="text-white/80" />
+              <span className="app-bar-ctrl-label">Date</span>
+              <input
+                type="date"
+                className="app-bar-date-input"
+                value={data.date || ''}
+                max={todayStr()}
+                onChange={(e) => handleMetaChange(data.shift, 'date', e.target.value)}
+              />
+            </div>
+            <div className="app-bar-ctrl-group">
+              <Clock size={14} className="text-white/80" />
+              <span className="app-bar-ctrl-label">Shift</span>
+              <select
+                className="app-bar-shift-select"
+                value={data.shift}
+                onChange={(e) => handleShiftChange(e.target.value as Shift)}
+              >
+                {SHIFT_LIST.map((s) => (
+                  <option key={s} value={s}>{SHIFT_LABELS[s]}</option>
+                ))}
+              </select>
+            </div>
           </div>
-          <div className="app-bar-ctrl-group">
-            <Clock size={14} className="text-white/80" />
-            <span className="app-bar-ctrl-label">Shift</span>
-            <select
-              className="app-bar-shift-select"
-              value={data.shift}
-              onChange={(e) => handleShiftChange(e.target.value as Shift)}
-            >
-              {SHIFT_LIST.map((s) => (
-                <option key={s} value={s}>{SHIFT_LABELS[s]}</option>
-              ))}
-            </select>
-          </div>
-        </div>
+        )}
 
-        {data.shift === 'Custom' && (
+        {!isBoard && data.shift === 'Custom' && (
           <div className="app-bar-custom no-print">
             <div className="app-bar-ctrl-group">
               <span className="app-bar-ctrl-label">Start</span>
@@ -725,7 +787,7 @@ function epochToConsoleTime(
         )}
       </div>
 
-      <div className="sm-container" style={{ paddingTop: 20, paddingBottom: 80 }}>
+      <div className={isBoard ? `board-container board-mode${navAutoHidden ? ' board-nav-hidden' : ''}` : 'sm-container'} style={isBoard ? undefined : { paddingTop: 20, paddingBottom: 80 }}>
         {effectiveView === 'calculator' ? (
           <CalculatorView
             calc={calcMemo}
@@ -739,6 +801,8 @@ function epochToConsoleTime(
             customHours={data.customHours}
             date={data.date}
           />
+        ) : effectiveView === 'board' ? (
+          <BoardView transitionMs={boardTransitionMs} />
         ) : effectiveView === 'downtime' ? (
           <DowntimeHistory
             date={data.date}
@@ -780,12 +844,14 @@ function epochToConsoleTime(
           />
         )}
 
-        <div className="footer">
-          Web Apps Console v3.01 - Created by <strong>Kelvin George</strong>
-        </div>
+        {!isBoard && (
+          <div className="footer">
+            Web Apps Console v3.01 - Created by <strong>Kelvin George</strong>
+          </div>
+        )}
       </div>
 
-      <nav className={`bottom-tab-bar${keyboardOpen ? ' bottom-tab-bar-hidden' : ''}`} aria-label="Section navigation" aria-hidden={keyboardOpen} style={{ ['--n' as string]: String(navItems.length) }}>
+      <nav className={`bottom-tab-bar${keyboardOpen || navAutoHidden ? ' bottom-tab-bar-hidden' : ''}`} aria-label="Section navigation" aria-hidden={keyboardOpen || navAutoHidden} style={{ ['--n' as string]: String(navItems.length) }}>
         <span className="bottom-tab-indicator" style={{ ['--i' as string]: String(navItems.findIndex((n) => n.id === effectiveView)) }} aria-hidden="true" />
         {navItems.map(({ id, label, Icon }) => (
           <button

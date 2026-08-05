@@ -1025,6 +1025,21 @@ tbody tr:hover { background-color: #eff6ff; }
      which overflows the landscape print page and clips the right columns. Let
      the fixed column widths below fit the page, like the Monitoring table. */
   .shift-report table { min-width: 0 !important; }
+  /* Without these, the wrapper keeps its screen overflow-x: auto in print (the
+     screen rule `.shift-report .table-wrapper` out-specifies the generic print
+     rule), so the table stays a scrollable region and the right columns get cut
+     off. Compact the 9 fixed columns (they total 1150px on screen) so the whole
+     table fits the landscape page and nothing is clipped. */
+  .shift-report .table-wrapper { overflow: visible !important; }
+  .shift-report th:nth-child(1), .shift-report td:nth-child(1) { width: 90px !important; }
+  .shift-report th:nth-child(2), .shift-report td:nth-child(2) { width: 70px !important; }
+  .shift-report th:nth-child(3), .shift-report td:nth-child(3) { width: 85px !important; }
+  .shift-report th:nth-child(4), .shift-report td:nth-child(4) { width: 65px !important; }
+  .shift-report th:nth-child(5), .shift-report td:nth-child(5) { width: 50px !important; }
+  .shift-report th:nth-child(6), .shift-report td:nth-child(6) { width: 50px !important; }
+  .shift-report th:nth-child(7), .shift-report td:nth-child(7) { width: 350px !important; }
+  .shift-report th:nth-child(8), .shift-report td:nth-child(8) { width: 80px !important; }
+  .shift-report th:nth-child(9), .shift-report td:nth-child(9) { width: 65px !important; }
   .modal-overlay {
     position: static !important;
     inset: auto !important;

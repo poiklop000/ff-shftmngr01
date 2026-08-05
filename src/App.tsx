@@ -369,7 +369,7 @@ export default function App() {
     let activeJob: ActiveJobSnapshot | null = null;
     try {
       const status = await fetchOfsStatus();
-      activeJob = buildActiveJobSnapshot(status);
+      activeJob = await buildActiveJobSnapshot(status);
     } catch {
       // If OFS is unreachable, save with null active job
     }

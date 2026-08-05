@@ -114,6 +114,22 @@ async function isOfsEnabled(supabase: ReturnType<typeof getSupabase>): Promise<b
   return data?.value?.toLowerCase() !== "false";
 }
 
+// Looks up a user correction (job_overrides) for the active job. When present,
+// the corrected product name / rated speed are layered onto the snapshot —
+// otherwise the raw OFS values are kept exactly as captured.
+async function getJobOverride(
+  supabase: ReturnType<typeof getSupabase>,
+  jobId: number | null,
+): Promise<{ product_name: string | null; rated_speed: number | null } | null> {
+  if (jobId == null) return null;
+  const { data } = await supabase
+    .from("job_overrides")
+    .select("product_name, rated_speed")
+    .eq("job_id", jobId)
+    .maybeSingle();
+  return data ?? null;
+}
+
 async function fetchLiveStatus(): Promise<OfsLiveStatus> {
   const user = Deno.env.get("OFS_USER");
   const pass = Deno.env.get("OFS_PASS");
@@ -212,6 +228,12 @@ Deno.serve(async (req: Request) => {
     }
     const status = await fetchLiveStatus();
     const snapshot = buildSnapshot(status);
+
+    const override = await getJobOverride(supabase, snapshot.job_id);
+    if (override) {
+      if (override.product_name) snapshot.product_name = override.product_name;
+      if (override.rated_speed != null) snapshot.rated_speed = override.rated_speed;
+    }
 
     const { data, error } = await supabase
       .from("job_snapshots")

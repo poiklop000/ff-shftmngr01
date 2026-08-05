@@ -3,16 +3,21 @@ import {
   Activity,
   AlertTriangle,
   Boxes,
+  Check,
   Clock,
   Gauge,
   Loader2,
   Package,
+  Pencil,
   RefreshCw,
+  RotateCcw,
   TrendingUp,
   User as UserIcon,
+  X,
 } from 'lucide-react';
 import { loadLiveIntervals } from '@/lib/liveConfig';
 import { fetchOfsStatus, classifyLineState, LINE_STATE_COLORS, type OfsLiveStatus, type OfsRunState, type LineStateClass } from '@/lib/ofs';
+import { loadJobOverride, saveJobOverride, deleteJobOverride, type JobOverride } from '@/lib/jobOverrides';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
 import { fetchDowntimeByDate, downtimeEventEndText, type DowntimeEvent } from '@/lib/downtime';
 import { filterByShiftWindow, getActiveHours, SHIFT_LABELS, type Shift } from '@/types';
@@ -60,6 +65,13 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
   const [downtimeLoading, setDowntimeLoading] = useState(false);
   const [liveRefreshMs, setLiveRefreshMs] = useState(DEFAULT_LIVE_MS);
   const [summaryRefreshMs, setSummaryRefreshMs] = useState(DEFAULT_SUMMARY_MS);
+  const [override, setOverride] = useState<JobOverride | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draftProduct, setDraftProduct] = useState('');
+  const [draftSpeed, setDraftSpeed] = useState('');
+  const [overrideSaving, setOverrideSaving] = useState(false);
+  const [overrideError, setOverrideError] = useState<string | null>(null);
+  const [overrideMsg, setOverrideMsg] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
@@ -153,11 +165,26 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
   const job = status?.job;
   const order = job?.$order;
   const product = order?.$product;
-  const productName = product?.description || order?.name || 'No active job';
+  const jobId = job?.id ?? null;
   const sku = product?.SKU || order?.clientId || '-';
   const target = job?.quantity ?? 0;
-  const ratedSpeed = job?.metadata?.ratedSpeed ? parseInt(job.metadata.ratedSpeed, 10) : 0;
+  const ofsProductName = product?.description || order?.name || '';
+  const ofsRatedSpeed = job?.metadata?.ratedSpeed ? parseInt(job.metadata.ratedSpeed, 10) : 0;
+  const productName = override?.product_name?.trim() || ofsProductName || 'No active job';
+  const ratedSpeed = override?.rated_speed ?? ofsRatedSpeed;
   const jobCounts = job?.counts ?? {};
+
+  useEffect(() => {
+    let cancelled = false;
+    setOverride(null);
+    if (jobId == null) return;
+    loadJobOverride(jobId)
+      .then((o) => {
+        if (!cancelled) setOverride(o);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [jobId]);
 
   const unitsIn = status?.process?.unitsin?.value ?? 0;
   const unitsOut = status?.process?.unitsout?.value ?? 0;
@@ -202,6 +229,55 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
     () => filterByShiftWindow(downtimeEvents, currentShift, customHours, date, (e) => e.start_text, undefined, downtimeEventEndText),
     [downtimeEvents, currentShift, customHours, date],
   );
+
+  const startEdit = () => {
+    setDraftProduct(override?.product_name?.trim() || ofsProductName);
+    setDraftSpeed(ratedSpeed > 0 ? String(ratedSpeed) : '');
+    setEditing(true);
+    setOverrideError(null);
+    setOverrideMsg(null);
+  };
+
+  const handleSaveOverride = async () => {
+    if (jobId == null) return;
+    const speed = parseInt(draftSpeed, 10);
+    if (!draftProduct.trim() || !Number.isFinite(speed) || speed <= 0) {
+      setOverrideError('Enter a product name and a valid rated speed (cans per hour).');
+      return;
+    }
+    setOverrideSaving(true);
+    setOverrideError(null);
+    setOverrideMsg(null);
+    try {
+      await saveJobOverride(jobId, draftProduct.trim(), speed);
+      setOverride(await loadJobOverride(jobId));
+      setEditing(false);
+      setOverrideMsg('Saved — this job now uses the corrected values in the report and snapshots.');
+      window.setTimeout(() => setOverrideMsg(null), 5000);
+    } catch (err) {
+      setOverrideError(err instanceof Error ? err.message : 'Could not save the override.');
+    } finally {
+      setOverrideSaving(false);
+    }
+  };
+
+  const handleResetOverride = async () => {
+    if (jobId == null) return;
+    setOverrideSaving(true);
+    setOverrideError(null);
+    setOverrideMsg(null);
+    try {
+      await deleteJobOverride(jobId);
+      setOverride(null);
+      setEditing(false);
+      setOverrideMsg('Reset — back to the raw OFS values.');
+      window.setTimeout(() => setOverrideMsg(null), 5000);
+    } catch (err) {
+      setOverrideError(err instanceof Error ? err.message : 'Could not reset the override.');
+    } finally {
+      setOverrideSaving(false);
+    }
+  };
 
   return (
     <div>
@@ -317,16 +393,114 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
       </div>
 
       <div className="card rounded-lg p-4 mb-4 border border-blue-200 bg-blue-50 text-blue-900">
-        <div className="flex items-center gap-2 mb-3 pb-2 border-b border-current">
-          <Package size={18} />
-          <h3 className="m-0 text-sm font-bold uppercase tracking-wide">Active Job</h3>
+        <div className="flex items-center justify-between gap-2 mb-3 pb-2 border-b border-current">
+          <div className="flex items-center gap-2">
+            <Package size={18} />
+            <h3 className="m-0 text-sm font-bold uppercase tracking-wide">Active Job</h3>
+            {override && !editing && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-blue-900 text-white">
+                Corrected
+              </span>
+            )}
+          </div>
+          {job && !editing && (
+            <button
+              type="button"
+              onClick={startEdit}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-bold text-white bg-brand-900 hover:bg-brand-800 transition-colors"
+            >
+              <Pencil size={13} />
+              Edit
+            </button>
+          )}
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <Field label="Product" value={productName} />
-          <Field label="SKU" value={sku} />
-          <Field label="Target Quantity" value={target.toLocaleString()} />
-          <Field label="Rated Speed" value={ratedSpeed > 0 ? `${ratedSpeed.toLocaleString()} /hr` : '-'} />
-        </div>
+
+        {editing ? (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-wide opacity-70 mb-0.5">Product name</div>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={draftProduct}
+                  onChange={(e) => setDraftProduct(e.target.value)}
+                  disabled={overrideSaving}
+                />
+              </div>
+              <Field label="SKU" value={sku} />
+              <Field label="Target Quantity" value={target.toLocaleString()} />
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-wide opacity-70 mb-0.5">Rated speed (cans/hr)</div>
+                <input
+                  type="number"
+                  min="1"
+                  className="form-control"
+                  value={draftSpeed}
+                  onChange={(e) => setDraftSpeed(e.target.value)}
+                  disabled={overrideSaving}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap mt-3">
+              <button
+                type="button"
+                onClick={handleSaveOverride}
+                disabled={overrideSaving}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-bold text-white bg-brand-900 hover:bg-brand-800 transition-colors"
+              >
+                {overrideSaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                {overrideSaving ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                disabled={overrideSaving}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-bold text-blue-900 bg-blue-100 hover:bg-blue-200 transition-colors"
+              >
+                <X size={13} />
+                Cancel
+              </button>
+              {override && (
+                <button
+                  type="button"
+                  onClick={handleResetOverride}
+                  disabled={overrideSaving}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-bold text-blue-900 bg-blue-100 hover:bg-blue-200 transition-colors"
+                >
+                  <RotateCcw size={13} />
+                  Reset to OFS
+                </button>
+              )}
+            </div>
+
+            <div className="text-[11px] font-medium opacity-70 mt-2">
+              Saved to the database for this job — the corrected values follow through to the monitoring
+              report and the job snapshots. Anything you leave unchanged is saved as-is.
+            </div>
+
+            {overrideError && (
+              <div className="flex items-start gap-2 rounded-md p-3 mt-2 border border-red-200 bg-red-50 text-red-800 text-[12px]">
+                <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                <span>{overrideError}</span>
+              </div>
+            )}
+            {overrideMsg && (
+              <div className="flex items-start gap-2 rounded-md p-3 mt-2 border border-green-200 bg-green-50 text-green-900 text-[12px]">
+                <Check size={15} className="mt-0.5 shrink-0" />
+                <span>{overrideMsg}</span>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <Field label="Product" value={productName} />
+            <Field label="SKU" value={sku} />
+            <Field label="Target Quantity" value={target.toLocaleString()} />
+            <Field label="Rated Speed" value={ratedSpeed > 0 ? `${ratedSpeed.toLocaleString()} /hr` : '-'} />
+          </div>
+        )}
 
         <div className="mt-4">
           <div className="flex justify-between items-center mb-1.5 text-[12px] font-semibold text-blue-900">

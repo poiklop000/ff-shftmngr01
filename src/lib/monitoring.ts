@@ -3,6 +3,7 @@ import type { Shift, ShiftData } from '@/types';
 import type { OfsLiveStatus } from './ofs';
 import type { DowntimeEvent } from './downtime';
 import type { CounterLogEntry } from '@/types';
+import { loadJobOverride } from './jobOverrides';
 
 export interface MonitoringRecord {
   id: string;
@@ -141,21 +142,31 @@ export async function deleteMonitoringRecord(date: string, shift: Shift): Promis
   if (error) throw new Error(error.message);
 }
 
-export function buildActiveJobSnapshot(status: OfsLiveStatus | null): ActiveJobSnapshot | null {
+export async function buildActiveJobSnapshot(status: OfsLiveStatus | null): Promise<ActiveJobSnapshot | null> {
   if (!status?.job) return null;
   const job = status.job;
+  const jobId = job.id ?? null;
+
+  // Layer a user correction (if any) on top of the OFS data. A network failure
+  // here falls back to the raw OFS values so a saved report is never blocked.
+  const override = jobId != null ? await loadJobOverride(jobId).catch(() => null) : null;
+
   const counts = job.counts ?? {};
   const out = counts.out ?? 0;
   const qty = job.quantity ?? 0;
-  const ratedSpeed = job.metadata?.ratedSpeed ? parseInt(job.metadata.ratedSpeed, 10) : 0;
+  const ofsRated = job.metadata?.ratedSpeed ? parseInt(job.metadata.ratedSpeed, 10) : 0;
+  const ratedSpeed = override?.rated_speed ?? ofsRated;
+  const ofsName = job.$order?.$product?.name ?? job.$order?.name ?? '';
+  const productName = override?.product_name?.trim() || ofsName;
+
   return {
-    productName: job.$order?.$product?.name ?? job.$order?.name ?? '',
+    productName,
     sku: job.$order?.$product?.SKU ?? '',
     targetQuantity: qty,
     ratedSpeed,
     produced: out,
     progress: qty > 0 ? (out / qty) * 100 : 0,
-    jobId: job.id ?? null,
+    jobId,
     orderName: job.$order?.name ?? null,
   };
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Loader2, Save, FolderOpen, CheckCircle2, Package, FileDown, Printer } from 'lucide-react';
+import { Download, Loader2, Save, FolderOpen, CheckCircle2, Package, FileDown, Printer, Plus } from 'lucide-react';
 import {
   filterByShiftWindow,
   getActiveHours,
@@ -69,7 +69,6 @@ export function MonitoringView({
   const [timelineEvents, setTimelineEvents] = useState<DowntimeEvent[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [consoleTime, setConsoleTime] = useState('-');
-  const [activeJobs, setActiveJobs] = useState<string[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [jobsError, setJobsError] = useState<string | null>(null);
 
@@ -92,7 +91,8 @@ export function MonitoringView({
     loadTimeline(currentShift, customHours, date);
   }, [loadTimeline, currentShift, customHours, date]);
 
-  // Auto-populate SKU from job snapshots in the database
+  // Auto-populate SKU from job snapshots in the database, but only while the
+  // card is still empty so it never overwrites jobs the user edited or added.
   useEffect(() => {
     if (!date) return;
     let cancelled = false;
@@ -101,8 +101,7 @@ export function MonitoringView({
     fetchJobsForShift(date, currentShift, customHours)
       .then((jobs) => {
         if (cancelled) return;
-        setActiveJobs(jobs);
-        if (jobs.length > 0 && sku[currentShift] !== jobs.join('\n')) {
+        if (jobs.length > 0 && (sku[currentShift] ?? '').trim() === '') {
           onMetaChange(currentShift, 'sku', jobs.join('\n'));
         }
       })
@@ -280,6 +279,37 @@ export function MonitoringView({
   const notesRef = useRef<HTMLTextAreaElement>(null);
   useAutoGrow(notesRef, notes[currentShift], 80);
 
+  // The SKU field stores one job per two lines: "Job 1\nProduct A\nJob 2\nProduct B".
+  const skuText = sku[currentShift] ?? '';
+
+  const skuJobs = useMemo(() => {
+    const lines = skuText.split('\n');
+    const jobs: { label: string; product: string }[] = [];
+    for (let i = 0; i < lines.length; i += 2) {
+      const label = lines[i] ?? '';
+      const product = lines[i + 1] ?? '';
+      if (!label.trim() && !product.trim()) continue;
+      jobs.push({ label, product });
+    }
+    return jobs;
+  }, [skuText]);
+
+  const commitSku = useCallback((jobs: { label: string; product: string }[]) => {
+    onMetaChange(currentShift, 'sku', jobs.map((j) => `${j.label}\n${j.product}`).join('\n'));
+  }, [onMetaChange, currentShift]);
+
+  const updateJob = useCallback((index: number, field: 'label' | 'product', value: string) => {
+    commitSku(skuJobs.map((j, i) => (i === index ? { ...j, [field]: value } : j)));
+  }, [skuJobs, commitSku]);
+
+  const addJob = useCallback(() => {
+    commitSku([...skuJobs, { label: `Job ${skuJobs.length + 1}`, product: '' }]);
+  }, [skuJobs, commitSku]);
+
+  const removeJob = useCallback((index: number) => {
+    commitSku(skuJobs.filter((_, i) => i !== index));
+  }, [skuJobs, commitSku]);
+
   return (
     <div>
       <PageHelp
@@ -308,8 +338,9 @@ export function MonitoringView({
           {
             title: "Active jobs (SKUs)",
             items: [
-              "The products for the shift's active jobs auto-populate at the top of the board from the job snapshots captured in the database.",
-              "Each active job shows a badge (Job 1, Job 2, ...) followed by the product name.",
+              "The products for the shift's active jobs auto-populate at the top of the board from the job snapshots captured in the database, but only while the card is empty.",
+              "Each active job is an editable badge (Job 1, Job 2, ...) with a product name. Edit the labels and products directly, use Add job to add more, or ✕ to remove one.",
+              "Edits are saved with the record and included in the printed report. Once you change the list by hand it won't be overwritten by the auto-populate.",
               "If no jobs are listed, no snapshots were captured for that date and shift, or the line was not running.",
             ],
           },
@@ -355,7 +386,7 @@ export function MonitoringView({
         </h3>
 
         <div className="card-row sku-card" style={{ marginTop: 12, flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
-            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.3px', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.3px', display: 'flex', alignItems: 'center', gap: 4 }}>
             <Package size={13} />
             SKUs:
           </label>
@@ -365,27 +396,48 @@ export function MonitoringView({
             </span>
           ) : jobsError ? (
             <span style={{ fontSize: 12, color: 'var(--danger-text)', fontWeight: 600 }}>{jobsError}</span>
-          ) : activeJobs.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {activeJobs.map((job, i) => {
-                const [jobName, ...rest] = job.split('\n');
-                const product = rest.join(' ');
-                return (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--blue-tag-text)', backgroundColor: 'var(--blue-tag-bg)', border: '1px solid var(--blue-tag-border)', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>
-                      {jobName}
-                    </span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--app-fg)', lineHeight: 1.4 }}>
-                      {product}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
           ) : (
-            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>
-              No active jobs captured for this shift yet.
-            </span>
+            <>
+              {skuJobs.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {skuJobs.map((job, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <input
+                        value={job.label}
+                        onChange={(e) => updateJob(i, 'label', e.target.value)}
+                        placeholder={`Job ${i + 1}`}
+                        title="Job number or label"
+                        aria-label={`Job ${i + 1} label`}
+                        style={{ width: 88, fontSize: 10, fontWeight: 700, color: 'var(--blue-tag-text)', backgroundColor: 'var(--blue-tag-bg)', border: '1px solid var(--blue-tag-border)', borderRadius: 999, padding: '4px 10px', textAlign: 'center' }}
+                      />
+                      <input
+                        value={job.product}
+                        onChange={(e) => updateJob(i, 'product', e.target.value)}
+                        placeholder="Product name"
+                        title="Product name"
+                        aria-label={`Job ${i + 1} product`}
+                        style={{ flex: 1, minWidth: 160, fontSize: 13, fontWeight: 600, color: 'var(--app-fg)', backgroundColor: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 6, padding: '4px 10px' }}
+                      />
+                      <button
+                        type="button"
+                        className="modal-close-btn"
+                        style={{ width: 22, height: 22 }}
+                        onClick={() => removeJob(i)}
+                        aria-label={`Remove ${job.label || `job ${i + 1}`}`}
+                        title="Remove this job"
+                      >✕</button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>
+                  No active jobs captured for this shift yet. Add jobs below, or they auto-populate when snapshots exist.
+                </span>
+              )}
+              <button type="button" className="tab-btn tab-btn-blue" style={{ alignSelf: 'flex-start', padding: '4px 12px', fontSize: 11 }} onClick={addJob} title="Add a job to the SKUs card">
+                <Plus size={12} /> Add job
+              </button>
+            </>
           )}
         </div>
       </div>

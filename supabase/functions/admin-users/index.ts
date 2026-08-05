@@ -33,7 +33,7 @@ type Role = (typeof VALID_ROLES)[number];
 
 // Pages a profile can be granted. The Admin page is intentionally excluded so
 // it always stays admin-only.
-const VALID_PAGES = ["calculator", "tracker", "live", "downtime", "analytics", "saved-records"] as const;
+const VALID_PAGES = ["calculator", "tracker", "live", "board", "downtime", "analytics", "saved-records"] as const;
 
 function normalizeRole(value: unknown): Role {
   return VALID_ROLES.includes(value as Role) ? (value as Role) : "operator";

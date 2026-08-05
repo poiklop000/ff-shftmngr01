@@ -395,7 +395,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
       <div className="card card-blue">
         <h3 style={{ margin: 0, border: 'none', padding: 0, borderBottom: '1px solid currentColor', paddingBottom: 6 }}>
           <BarChart3 size={16} style={{ verticalAlign: 'text-bottom', marginRight: 6 }} />
-          Analytics â€” Data Review
+          Analytics — Data Review
         </h3>
 
         <div className="card-row" style={{ flexWrap: 'wrap', gap: 10, marginTop: 10 }}>
@@ -455,7 +455,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
 
       {isLoading && (
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, padding: 24, fontSize: 13, fontWeight: 600, color: 'var(--text-faint)' }}>
-          <Loader2 size={16} className="animate-spin" /> Loading analytics dataâ€¦
+          <Loader2 size={16} className="animate-spin" /> Loading analytics data…
         </div>
       )}
 
@@ -572,7 +572,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
                 {jobs.map((j, i) => (
                   <div key={j.jobId}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, marginBottom: 2 }}>
-                      <span>Job {j.jobId} â€” {j.product}</span>
+                      <span>Job {j.jobId} — {j.product}</span>
                       <span>{j.progressPct.toFixed(0)}%</span>
                     </div>
                     <div style={{ width: '100%', height: 12, backgroundColor: 'var(--track-bg)', borderRadius: 6, overflow: 'hidden' }}>
@@ -599,7 +599,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 <input
                   type="search"
-                  placeholder="Search reasonâ€¦"
+                  placeholder="Search reason…"
                   value={textFilter}
                   onChange={(e) => setTextFilter(e.target.value)}
                   style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--input-border)', backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', maxWidth: 160 }}
@@ -707,7 +707,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
                   <div key={category}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, marginBottom: 2 }}>
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>{category}</span>
-                      <span>{formatDuration(ms)} Â· {count} {count === 1 ? 'event' : 'events'}</span>
+                      <span>{formatDuration(ms)} · {count} {count === 1 ? 'event' : 'events'}</span>
                     </div>
                     <div style={{ width: '100%', height: 12, backgroundColor: 'var(--track-bg)', borderRadius: 6, overflow: 'hidden' }}>
                       <div
@@ -823,7 +823,7 @@ function CommentList({ comments }: { comments: DowntimeComment[] }) {
           <MessageSquare size={12} className="text-brand-500 mt-0.5 shrink-0" />
           <div>
             <span className="font-semibold">{c.userName}</span>
-            {c.crewName && <span className="text-slate-400"> Â· {c.crewName}</span>}
+            {c.crewName && <span className="text-slate-400"> · {c.crewName}</span>}
             <span className="text-slate-400 ml-1.5">
               {new Date(c.commentTimestamp).toLocaleString('en-AU', {
                 day: '2-digit',

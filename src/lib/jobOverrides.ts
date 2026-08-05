@@ -17,6 +17,17 @@ export async function loadJobOverride(jobId: number): Promise<JobOverride | null
   return (data as JobOverride) ?? null;
 }
 
+export async function fetchOverridesForJobs(jobIds: number[]): Promise<JobOverride[]> {
+  if (jobIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('job_overrides')
+    .select('job_id, product_name, rated_speed')
+    .in('job_id', jobIds);
+
+  if (error) throw new Error(error.message);
+  return (data as JobOverride[]) ?? [];
+}
+
 export async function saveJobOverride(
   jobId: number,
   productName: string,

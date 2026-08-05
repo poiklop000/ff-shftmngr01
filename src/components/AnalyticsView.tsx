@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, Loader2, FileDown, RefreshCw, Calendar, Clock, MessageSquare } from 'lucide-react';
+import { BarChart3, Loader2, FileDown, RefreshCw, Calendar, Clock, MessageSquare, Pencil, Check, X, RotateCcw, AlertTriangle } from 'lucide-react';
 import { PageHelp } from '@/components/PageHelp';
 import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
 import { fetchDowntimeBetween, formatDuration, localDateTimeToEpoch, type DowntimeComment, type DowntimeEvent } from '@/lib/downtime';
@@ -8,6 +8,7 @@ import {
   fetchJobsInRange,
   type JobSnapshotRow,
 } from '@/lib/analytics';
+import { fetchOverridesForJobs, saveJobOverride, deleteJobOverride, type JobOverride } from '@/lib/jobOverrides';
 
 function csvEscape(value: string | number | null | undefined): string {
   const str = String(value ?? '');
@@ -132,6 +133,12 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
   const [msg, setMsg] = useState<string | null>(null);
   const [loadedRange, setLoadedRange] = useState<{ start: string; end: string } | null>(persisted.loadedRange);
   const [expandedDowntimeId, setExpandedDowntimeId] = useState<number | null>(null);
+  const [overrides, setOverrides] = useState<Record<number, JobOverride>>({});
+  const [editingJobId, setEditingJobId] = useState<number | null>(null);
+  const [draftProduct, setDraftProduct] = useState('');
+  const [draftSpeed, setDraftSpeed] = useState('');
+  const [overrideSaving, setOverrideSaving] = useState(false);
+  const [overrideError, setOverrideError] = useState<string | null>(null);
 
   // Keep the Analytics filters and last loaded range in localStorage so the
   // page remembers them when the user navigates away and comes back.
@@ -171,6 +178,16 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
       ]);
       const hourly = hourlyAll.filter((h) => h.start >= sEpoch && h.start <= eEpoch);
       setData({ jobs, downtime, hourly });
+
+      // User corrections (product name / rated speed) from the Live page or
+      // Analytics edits, keyed by job so the jobs table can layer them on top
+      // of the captured snapshot values.
+      const jobIds = Array.from(new Set(jobs.map((j) => j.job_id).filter((id): id is number => id != null)));
+      const ovrRows = await fetchOverridesForJobs(jobIds);
+      const ovrMap: Record<number, JobOverride> = {};
+      for (const o of ovrRows) ovrMap[o.job_id] = o;
+      setOverrides(ovrMap);
+
       setLoadedRange({ start, end });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load analytics data');
@@ -208,7 +225,59 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
     loadData(st, en);
   };
 
-  // Group job snapshots into one row per distinct OFS job.
+  const startEdit = (jobId: number) => {
+    const j = jobs.find((x) => x.jobId === jobId);
+    if (!j) return;
+    setDraftProduct(j.product);
+    setDraftSpeed(j.ratedSpeed > 0 ? String(j.ratedSpeed) : '');
+    setEditingJobId(jobId);
+    setOverrideError(null);
+  };
+
+  const handleSaveOverride = async (jobId: number) => {
+    const speed = parseInt(draftSpeed, 10);
+    if (!draftProduct.trim() || !Number.isFinite(speed) || speed <= 0) {
+      setOverrideError('Enter a product name and a valid rated speed (cans per hour).');
+      return;
+    }
+    setOverrideSaving(true);
+    setOverrideError(null);
+    try {
+      await saveJobOverride(jobId, draftProduct.trim(), speed);
+      setOverrides((prev) => ({
+        ...prev,
+        [jobId]: { job_id: jobId, product_name: draftProduct.trim(), rated_speed: speed },
+      }));
+      setEditingJobId(null);
+      setMsg('Correction saved — applies across Live, Monitoring, and Analytics.');
+    } catch (err) {
+      setOverrideError(err instanceof Error ? err.message : 'Could not save the correction.');
+    } finally {
+      setOverrideSaving(false);
+    }
+  };
+
+  const handleResetOverride = async (jobId: number) => {
+    setOverrideSaving(true);
+    setOverrideError(null);
+    try {
+      await deleteJobOverride(jobId);
+      setOverrides((prev) => {
+        const next = { ...prev };
+        delete next[jobId];
+        return next;
+      });
+      setEditingJobId(null);
+      setMsg('Reset — back to the raw OFS values.');
+    } catch (err) {
+      setOverrideError(err instanceof Error ? err.message : 'Could not reset the correction.');
+    } finally {
+      setOverrideSaving(false);
+    }
+  };
+
+  // Group job snapshots into one row per distinct OFS job, layering any user
+  // correction (job_overrides) on top of the captured snapshot values.
   const jobs = useMemo(() => {
     if (!data) return [];
     const map = new Map<number, { rows: JobSnapshotRow[] }>();
@@ -225,6 +294,8 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
       quantity: number;
       produced: number;
       progressPct: number;
+      ratedSpeed: number;
+      hasOverride: boolean;
       firstCapture: string;
       lastCapture: string;
       shifts: string[];
@@ -234,13 +305,17 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
       const last = rows[rows.length - 1]!;
       const first = rows[0]!;
       const shifts = Array.from(new Set(rows.map((r) => r.shift_name).filter(Boolean))) as string[];
+      const ovr = overrides[jobId];
+      const ofsProduct = last.order_name ?? last.product_name ?? `Job ${jobId}`;
       list.push({
         jobId,
-        product: last.order_name ?? last.product_name ?? `Job ${jobId}`,
+        product: ovr?.product_name?.trim() || ofsProduct,
         sku: last.sku ?? '',
         quantity: last.quantity ?? 0,
         produced: last.produced ?? 0,
         progressPct: last.progress_pct ?? 0,
+        ratedSpeed: ovr?.rated_speed ?? (last.rated_speed ?? 0),
+        hasOverride: !!ovr,
         firstCapture: first.capture_time,
         lastCapture: last.capture_time,
         shifts,
@@ -249,7 +324,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
     }
     list.sort((a, b) => a.jobId - b.jobId);
     return list;
-  }, [data]);
+  }, [data, overrides]);
 
   const downtime = useMemo(() => {
     if (!data) return [];
@@ -331,9 +406,9 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
     if (!data) return;
     const rows: (string | number | null | undefined)[][] = [];
     rows.push(['SECTION', 'JOBS']);
-    rows.push(['Job', 'Product', 'SKU', 'Target', 'Produced', 'Progress %', 'First Capture', 'Last Capture', 'Runs']);
+    rows.push(['Job', 'Product', 'SKU', 'Rated Speed', 'Target', 'Produced', 'Progress %', 'First Capture', 'Last Capture', 'Runs']);
     for (const j of jobs) {
-      rows.push([`Job ${j.jobId}`, j.product, j.sku, j.quantity, j.produced, j.progressPct.toFixed(1), aucklandTime(j.firstCapture), aucklandTime(j.lastCapture), j.runs]);
+      rows.push([`Job ${j.jobId}`, j.product, j.sku, j.ratedSpeed, j.quantity, j.produced, j.progressPct.toFixed(1), aucklandTime(j.firstCapture), aucklandTime(j.lastCapture), j.runs]);
     }
     rows.push(['SECTION', 'DOWNTIME']);
     rows.push(['Start', 'Duration (ms)', 'Duration', 'Type', 'Category', 'Reason', 'Crew', 'Status']);
@@ -502,8 +577,8 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
                 onClick={() => {
                   downloadCsv(
                     `analytics_jobs_${loadedRange?.start}_to_${loadedRange?.end}.csv`,
-                    ['Job', 'Product', 'SKU', 'Target', 'Produced', 'Progress %', 'First Capture', 'Last Capture', 'Shifts', 'Runs'],
-                    jobs.map((j) => [`Job ${j.jobId}`, j.product, j.sku, j.quantity, j.produced, j.progressPct.toFixed(1), aucklandTime(j.firstCapture), aucklandTime(j.lastCapture), j.shifts.join(' | '), j.runs]),
+                    ['Job', 'Product', 'SKU', 'Rated Speed', 'Target', 'Produced', 'Progress %', 'First Capture', 'Last Capture', 'Shifts', 'Runs'],
+                    jobs.map((j) => [`Job ${j.jobId}`, j.product, j.sku, j.ratedSpeed, j.quantity, j.produced, j.progressPct.toFixed(1), aucklandTime(j.firstCapture), aucklandTime(j.lastCapture), j.shifts.join(' | '), j.runs]),
                   );
                   setMsg('Jobs CSV exported');
                 }}
@@ -517,49 +592,137 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
               </div>
             ) : (
               <div className="card-scroll">
-                <table className="w-full text-[13px]" style={{ minWidth: 680 }}>
+                <table className="w-full text-[13px]" style={{ minWidth: 860 }}>
                   <thead>
                     <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-800 border-b border-slate-200">
                       <th className="px-4 py-2.5">Job</th>
                       <th className="px-4 py-2.5">SKU</th>
+                      <th className="px-4 py-2.5">Rated Speed</th>
                       <th className="px-4 py-2.5">Target</th>
                       <th className="px-4 py-2.5">Produced</th>
                       <th className="px-4 py-2.5">Progress</th>
                       <th className="px-4 py-2.5">First / Last Capture</th>
                       <th className="px-4 py-2.5">Shifts</th>
                       <th className="px-4 py-2.5">Snapshots</th>
+                      <th className="px-4 py-2.5">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {jobs.map((j) => (
-                      <tr key={j.jobId} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                        <td className="px-4 py-3 text-slate-700">
-                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--blue-tag-text)', backgroundColor: 'var(--blue-tag-bg)', border: '1px solid var(--blue-tag-border)', borderRadius: 999, padding: '2px 8px', whiteSpace: 'nowrap' }}>
-                            Job {j.jobId}
-                          </span>
-                          <div style={{ fontSize: 12, marginTop: 4 }}>{j.product}</div>
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">{j.sku || '-'}</td>
-                        <td className="px-4 py-3 text-slate-600">{j.quantity.toLocaleString()}</td>
-                        <td className="px-4 py-3 text-slate-600">{j.produced.toLocaleString()}</td>
-                        <td className="px-4 py-3 text-slate-700">
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <div style={{ width: 80, height: 8, backgroundColor: 'var(--track-bg)', borderRadius: 999, overflow: 'hidden' }}>
-                              <div style={{ width: `${Math.min(100, Math.max(0, j.progressPct))}%`, height: '100%', backgroundColor: j.progressPct >= 100 ? '#16a34a' : '#1d4ed8' }} />
+                    {jobs.map((j) => {
+                      const isEditing = editingJobId === j.jobId;
+                      return (
+                        <tr key={j.jobId} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                          <td className="px-4 py-3 text-slate-700">
+                            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--blue-tag-text)', backgroundColor: 'var(--blue-tag-bg)', border: '1px solid var(--blue-tag-border)', borderRadius: 999, padding: '2px 8px', whiteSpace: 'nowrap' }}>
+                              Job {j.jobId}
+                            </span>
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                value={draftProduct}
+                                onChange={(e) => setDraftProduct(e.target.value)}
+                                disabled={overrideSaving}
+                                aria-label={`Product name for job ${j.jobId}`}
+                                style={{ display: 'block', width: '100%', marginTop: 4, fontSize: 13, fontWeight: 600, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--input-border)', backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', maxWidth: 240 }}
+                              />
+                            ) : (
+                              <div style={{ fontSize: 12, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                {j.product}
+                                {j.hasOverride && (
+                                  <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.3px', color: 'var(--blue-tag-text)', backgroundColor: 'var(--blue-tag-bg)', border: '1px solid var(--blue-tag-border)', borderRadius: 999, padding: '1px 6px', whiteSpace: 'nowrap' }}>
+                                    Corrected
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">{j.sku || '-'}</td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                min="1"
+                                value={draftSpeed}
+                                onChange={(e) => setDraftSpeed(e.target.value)}
+                                disabled={overrideSaving}
+                                aria-label={`Rated speed for job ${j.jobId}`}
+                                style={{ width: 120, fontSize: 13, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--input-border)', backgroundColor: 'var(--input-bg)', color: 'var(--input-text)' }}
+                              />
+                            ) : (
+                              j.ratedSpeed > 0 ? `${j.ratedSpeed.toLocaleString()} /hr` : '-'
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">{j.quantity.toLocaleString()}</td>
+                          <td className="px-4 py-3 text-slate-600">{j.produced.toLocaleString()}</td>
+                          <td className="px-4 py-3 text-slate-700">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <div style={{ width: 80, height: 8, backgroundColor: 'var(--track-bg)', borderRadius: 999, overflow: 'hidden' }}>
+                                <div style={{ width: `${Math.min(100, Math.max(0, j.progressPct))}%`, height: '100%', backgroundColor: j.progressPct >= 100 ? '#16a34a' : '#1d4ed8' }} />
+                              </div>
+                              <span>{j.progressPct.toFixed(0)}%</span>
                             </div>
-                            <span>{j.progressPct.toFixed(0)}%</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
-                          <div style={{ fontSize: 12 }}>{aucklandTime(j.firstCapture)}</div>
-                          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{aucklandTime(j.lastCapture)}</div>
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">{j.shifts.length > 0 ? j.shifts.join(', ') : '-'}</td>
-                        <td className="px-4 py-3 text-slate-600">{j.runs}</td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
+                            <div style={{ fontSize: 12 }}>{aucklandTime(j.firstCapture)}</div>
+                            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{aucklandTime(j.lastCapture)}</div>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">{j.shifts.length > 0 ? j.shifts.join(', ') : '-'}</td>
+                          <td className="px-4 py-3 text-slate-600">{j.runs}</td>
+                          <td className="px-4 py-3">
+                            {isEditing ? (
+                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveOverride(j.jobId)}
+                                  disabled={overrideSaving}
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 11, fontWeight: 700, color: '#fff', backgroundColor: '#1d4ed8', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+                                >
+                                  {overrideSaving ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingJobId(null)}
+                                  disabled={overrideSaving}
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 11, fontWeight: 700, color: '#1d4ed8', backgroundColor: 'transparent', border: '1px solid #1d4ed8', borderRadius: 6, cursor: 'pointer' }}
+                                >
+                                  <X size={11} />
+                                  Cancel
+                                </button>
+                                {j.hasOverride && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleResetOverride(j.jobId)}
+                                    disabled={overrideSaving}
+                                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 11, fontWeight: 700, color: '#1d4ed8', backgroundColor: 'transparent', border: '1px solid #1d4ed8', borderRadius: 6, cursor: 'pointer' }}
+                                  >
+                                    <RotateCcw size={11} />
+                                    Reset
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => startEdit(j.jobId)}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 11, fontWeight: 700, color: '#1d4ed8', backgroundColor: 'transparent', border: '1px solid #1d4ed8', borderRadius: 6, cursor: 'pointer' }}
+                              >
+                                <Pencil size={11} />
+                                Edit
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
+                {overrideError && (
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, margin: 8, padding: 8, borderRadius: 6, border: '1px solid var(--danger-border, #fecaca)', backgroundColor: 'var(--danger-bg, #fef2f2)', color: 'var(--danger-text)', fontSize: 12, fontWeight: 600 }}>
+                    <AlertTriangle size={13} style={{ marginTop: 1, flexShrink: 0 }} />
+                    <span>{overrideError}</span>
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -22,6 +22,12 @@ function csvEscape(value: string | number): string {
   return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
 }
 
+// A zero-width sentinel that renders as an empty input but survives the
+// newline-joined storage, so "Add product" always creates a visible slot even
+// when the card has no products yet (a bare "" would collapse to an empty
+// string once joined and never render).
+const EMPTY_SLOT = '\u200B';
+
 interface MonitoringViewProps {
   db: ShiftDb;
   notes: Record<Shift, string>;
@@ -304,26 +310,33 @@ export function MonitoringView({
   useAutoGrow(notesRef, notes[currentShift], 80);
 
   // The SKU field stores one product name per line. Legacy records also contain
-  // "Job N" label lines interleaved with products — those are skipped.
+  // "Job N" label lines interleaved with products — those are skipped. Empty
+  // lines are kept so an added-but-unfilled slot stays visible.
   const skuText = sku[currentShift] ?? '';
 
   const skuProducts = useMemo(() => {
+    if (skuText === '') return [];
     return skuText
       .split('\n')
       .map((l) => l.trim())
-      .filter((l) => l && !/^Job\s+\d+$/i.test(l));
+      .filter((l) => !/^Job\s+\d+$/i.test(l));
   }, [skuText]);
+
+  const printProducts = useMemo(
+    () => skuProducts.filter((p) => p && p !== EMPTY_SLOT),
+    [skuProducts],
+  );
 
   const commitSku = useCallback((products: string[]) => {
     onMetaChange(currentShift, 'sku', products.join('\n'));
   }, [onMetaChange, currentShift]);
 
   const updateProduct = useCallback((index: number, value: string) => {
-    commitSku(skuProducts.map((p, i) => (i === index ? value : p)));
+    commitSku(skuProducts.map((p, i) => (i === index ? value.replace(/\u200B/g, '') : p)));
   }, [skuProducts, commitSku]);
 
   const addProduct = useCallback(() => {
-    commitSku([...skuProducts, '']);
+    commitSku([...skuProducts, EMPTY_SLOT]);
   }, [skuProducts, commitSku]);
 
   const removeProduct = useCallback((index: number) => {
@@ -437,7 +450,7 @@ export function MonitoringView({
                     {skuProducts.map((product, i) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <input
-                          value={product}
+                          value={product === EMPTY_SLOT ? '' : product}
                           onChange={(e) => updateProduct(i, e.target.value)}
                           placeholder={`Product ${i + 1}`}
                           title="Product name"
@@ -449,7 +462,7 @@ export function MonitoringView({
                           className="modal-close-btn"
                           style={{ width: 22, height: 22 }}
                           onClick={() => removeProduct(i)}
-                          aria-label={`Remove ${product || `product ${i + 1}`}`}
+                          aria-label={`Remove ${product && product !== EMPTY_SLOT ? product : `product ${i + 1}`}`}
                           title="Remove this product"
                         >✕</button>
                       </div>
@@ -468,8 +481,8 @@ export function MonitoringView({
           </div>
 
           {/* Plain-text version shown only when printing */}
-          {skuProducts.length > 0 && (
-            <div className="print-text-block print-only">{skuProducts.join('\n')}</div>
+          {printProducts.length > 0 && (
+            <div className="print-text-block print-only">{printProducts.join('\n')}</div>
           )}
         </div>
       </div>

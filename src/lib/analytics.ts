@@ -18,6 +18,7 @@ export interface JobSnapshotRow {
   run_state: string | null;
   crew_name: string | null;
   shift_name: string | null;
+  rated_speed: number | null;
 }
 
 /**
@@ -42,7 +43,7 @@ export async function fetchJobsInRange(
     const { data, error } = await withTimeout(
       supabase
         .from('job_snapshots')
-        .select('id, capture_time, job_id, product_name, sku, order_name, quantity, produced, progress_pct, run_state, crew_name, shift_name')
+        .select('id, capture_time, job_id, product_name, sku, order_name, quantity, produced, progress_pct, run_state, crew_name, shift_name, rated_speed')
         .gte('capture_time', startIso)
         .lt('capture_time', endIso)
         .order('capture_time', { ascending: true })

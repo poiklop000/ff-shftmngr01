@@ -67,12 +67,13 @@ export function ShiftReport({ shift, date, hours, boardData, notes, sku, downtim
   }, [rows, rowCount]);
 
   // The SKU field stores one product name per line. Legacy records also contain
-  // "Job N" label lines interleaved with products — those are skipped.
+  // "Job N" label lines interleaved with products — those are skipped, as are
+  // empty "Add product" slots (sentinel '\u200B').
   const skuProducts = (() => {
     return (sku || '')
       .split('\n')
       .map((l) => l.trim())
-      .filter((l) => l && !/^Job\s+\d+$/i.test(l));
+      .filter((l) => l && l !== '\u200B' && !/^Job\s+\d+$/i.test(l));
   })();
 
   return (

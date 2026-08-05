@@ -34,6 +34,7 @@ import {
   type ToggleState,
 } from '@/types';
 import { fetchCounterLogsByDate } from '@/lib/counterLogs';
+import { fetchHourlyRatedSpeeds } from '@/lib/jobSnapshots';
 import { fetchDowntimeForShift, type DowntimeEvent } from '@/lib/downtime';
 import { saveMonitoringRecord, loadMonitoringRecord, buildActiveJobSnapshot, type ActiveJobSnapshot } from '@/lib/monitoring';
 import { fetchOfsStatus } from '@/lib/ofs';
@@ -498,6 +499,9 @@ function epochToConsoleTime(
     if (logs.length === 0) {
       throw new Error(`No counter readings found in the database for ${date}.`);
     }
+    // Rated speed per hour comes from job_snapshots, which already carries any
+    // Live-page correction (capture-active-jobs layers job_overrides onto it).
+    const ratedSpeeds = await fetchHourlyRatedSpeeds(date, shift, data.customHours);
     setData((prev) => {
       const activeHours = getActiveHours(shift, prev.customHours);
       const outputs = computeHourlyOutputs(logs, activeHours, prev.date);
@@ -509,6 +513,10 @@ function epochToConsoleTime(
       for (let i = 0; i < rowCount; i++) {
         if (outputs[i] !== undefined) {
           next.db[shift].rows[i].out = outputs[i]!;
+        }
+        // Only fill Rated Speed where the user hasn't typed a value yet.
+        if (ratedSpeeds[i] !== undefined && next.db[shift].rows[i].spd.trim() === '') {
+          next.db[shift].rows[i].spd = ratedSpeeds[i]!.toLocaleString();
         }
       }
       return next;

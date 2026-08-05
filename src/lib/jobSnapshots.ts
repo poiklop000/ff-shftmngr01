@@ -122,6 +122,157 @@ export async function fetchJobsForShift(
   return productLines;
 }
 
+/**
+ * Fetches job snapshots for the given date + shift window and returns a map of
+ * row index -> rated speed (cans/hour) for the job that was running in that
+ * hour interval. The values come from job_snapshots.rated_speed, which already
+ * has any user correction from the Live page layered on top by
+ * capture-active-jobs. Hours where the line was not running (idle/cleaning/
+ * setup) are left out, so the Monitoring "Import Counter" can fill the Rated
+ * Speed column only for hours the line actually produced.
+ *
+ * When several distinct rated speeds appear within one hour (a job handover),
+ * the value that appears most often wins. If a snapshot has no run_state data
+ * (older captures), every hour with a non-null rated speed is filled instead,
+ * mirroring fetchJobsForShift's fallback.
+ */
+export async function fetchHourlyRatedSpeeds(
+  date: string,
+  shift: Shift,
+  customHours: string[],
+): Promise<Record<number, number>> {
+  if (!date) return {};
+
+  const hours = getActiveHours(shift, customHours);
+  if (hours.length === 0) return {};
+
+  // Same wall-clock window logic as fetchJobsForShift so the query only reads
+  // snapshots captured during this shift's own hours (overnight shifts span
+  // into the next calendar day).
+  const shiftStartStr = hours[0]!.split(' - ')[0]!.trim();
+  const lastInterval = hours[hours.length - 1]!;
+  const shiftEndStr = lastInterval.split(' - ')[1]!.trim();
+  const isOvernight = parseInt(shiftStartStr.split(':')[0] ?? '0', 10) >= 12;
+
+  let endDate = date;
+  if (isOvernight) {
+    const d = new Date(`${date}T00:00:00`);
+    d.setDate(d.getDate() + 1);
+    endDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  const startIso = new Date(localDateTimeToEpoch(`${date}T${shiftStartStr}`)).toISOString();
+  const endIso = new Date(localDateTimeToEpoch(`${endDate}T${shiftEndStr}`)).toISOString();
+
+  interface RatedSpeedRow {
+    capture_time: string;
+    run_state: string | null;
+    rated_speed: number | null;
+  }
+
+  // Snapshots are captured up to once a minute, so page past the 1000-row cap
+  // the same way fetchJobsForShift does.
+  const all: RatedSpeedRow[] = [];
+  const PAGE = 1000;
+  for (let offset = 0; offset < 100000; offset += PAGE) {
+    const { data, error } = await withTimeout(
+      supabase
+        .from('job_snapshots')
+        .select('capture_time, run_state, rated_speed')
+        .gte('capture_time', startIso)
+        .lt('capture_time', endIso)
+        .order('capture_time', { ascending: true })
+        .range(offset, offset + PAGE - 1),
+      DB_TIMEOUT_MS,
+    );
+    if (error) throw new Error(error.message);
+    const page = (data as RatedSpeedRow[]) ?? [];
+    all.push(...page);
+    if (page.length < PAGE) break;
+  }
+  if (all.length === 0) return {};
+
+  const anyRunState = all.some((r) => !!r.run_state);
+  const shiftStartMin = timeStrToMinutes(shiftStartStr);
+  const shiftEndMin = shiftTimeToMinutes(shiftEndStr, shiftStartMin);
+
+  const intervals = hours.map((interval) => {
+    const [startStr, endStr] = interval.split(' - ').map((s) => s.trim());
+    const start = startStr ?? '';
+    const end = endStr ?? start;
+    return {
+      startMin: shiftTimeToMinutes(start, shiftStartMin),
+      endMin: shiftTimeToMinutes(end, shiftStartMin),
+    };
+  });
+
+  const buckets = new Map<number, number[]>();
+  for (const row of all) {
+    if (row.rated_speed == null || row.rated_speed <= 0) continue;
+    // Only fill hours the line was actually running. If the snapshots predate
+    // the run_state column, accept any non-null rated speed instead.
+    if (anyRunState && !isRunningState(row.run_state)) continue;
+
+    const consoleTime = utcIsoToConsoleTime(row.capture_time);
+    const min = consoleTimeToShiftMinutes(consoleTime, date);
+    if (min < shiftStartMin || min >= shiftEndMin) continue;
+
+    const idx = intervals.findIndex((iv) => min >= iv.startMin && min < iv.endMin);
+    if (idx < 0) continue;
+    const list = buckets.get(idx) ?? [];
+    list.push(row.rated_speed);
+    buckets.set(idx, list);
+  }
+
+  const result: Record<number, number> = {};
+  for (const [idx, speeds] of buckets) {
+    const counts = new Map<number, number>();
+    for (const s of speeds) counts.set(s, (counts.get(s) ?? 0) + 1);
+    let best = 0;
+    let bestCount = 0;
+    for (const [s, c] of counts) {
+      if (c > bestCount) {
+        best = s;
+        bestCount = c;
+      }
+    }
+    if (best > 0) result[idx] = best;
+  }
+  return result;
+}
+
+function timeStrToMinutes(t: string): number {
+  const [h, m] = t.split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+// Converts an "HH:MM" wall-clock time to minutes-of-shift-day, rolling times
+// before the shift start forward by 1440 (e.g. "00:30" during a 22:00 shift
+// becomes minute 1470). Mirrors the private helper in types.ts.
+function shiftTimeToMinutes(time: string, shiftStartMin: number): number {
+  const min = timeStrToMinutes(time);
+  return min < shiftStartMin ? min + 1440 : min;
+}
+
+// Converts a UTC ISO capture_time to an OFS console-time string
+// ("YYYY-MM-DD HH:MM") in Pacific/Auckland wall-clock, so it can be compared
+// against the shift window with the same consoleTimeToShiftMinutes math used
+// elsewhere in the app.
+function utcIsoToConsoleTime(iso: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Pacific/Auckland',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(iso));
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '0';
+  const hour = get('hour') === '24' ? '00' : get('hour');
+  return `${get('year')}-${get('month')}-${get('day')} ${hour}:${get('minute')}`;
+}
+
 function toNum(v: number | null | undefined): number {
   return typeof v === 'number' && isFinite(v) ? v : 0;
 }

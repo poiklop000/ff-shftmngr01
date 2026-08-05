@@ -177,7 +177,7 @@ export function MonitoringView({
     setImportMsg(null);
     try {
       await onImportCounter();
-      setImportMsg('Counter data imported');
+      setImportMsg('Counter data imported — Actual Output filled, Rated Speed filled where the line was running');
     } catch (err) {
       setImportMsg(err instanceof Error ? err.message : 'Import failed');
     } finally {

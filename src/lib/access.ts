@@ -16,9 +16,9 @@ export const VALID_VIEWS: View[] = [
 // Pages each role is allowed to open by default. Per-user overrides live in
 // profiles.page_access and are resolved by userAllowedViews().
 export const ROLE_ACCESS: Record<Role, View[]> = {
-  operator: ['live', 'board', 'downtime', 'calculator'],
-  team_lead: ['live', 'board', 'tracker', 'downtime', 'calculator', 'saved-records'],
-  manager: ['live', 'board', 'tracker', 'downtime', 'calculator', 'analytics', 'saved-records'],
+  operator: ['live', 'downtime', 'calculator'],
+  team_lead: ['live', 'tracker', 'downtime', 'calculator', 'saved-records'],
+  manager: ['live', 'tracker', 'downtime', 'calculator', 'analytics', 'saved-records'],
   admin: ['live', 'board', 'tracker', 'downtime', 'calculator', 'analytics', 'saved-records', 'admin'],
 };
 

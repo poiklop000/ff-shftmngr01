@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { FileDown, Loader2, ExternalLink, Printer, History, X } from 'lucide-react';
 import { PageHelp } from '@/components/PageHelp';
 import { ShiftReport } from '@/components/ShiftReport';
@@ -9,11 +8,6 @@ import {
 } from '@/lib/analytics';
 import { fetchRecordAudit, type MonitoringRecord, type MonitoringRecordAudit } from '@/lib/monitoring';
 import { downloadCsv } from '@/lib/export';
-
-const isIOS = () =>
-  /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
-  window.matchMedia('(display-mode: standalone)').matches;
 
 export function SavedRecordsView() {
   const [records, setRecords] = useState<MonitoringRecord[]>([]);
@@ -83,117 +77,40 @@ export function SavedRecordsView() {
     setMsg('Records CSV exported');
   };
 
-  const printReportInPage = (reportHtml: string, title: string) => {
-    // Prints from the current page (used on iOS — a standalone home-screen PWA
-    // can't return from a popup — and as a fallback when popups are blocked).
-    // The app root is hidden with inline styles and the report is appended to
-    // <body>, so the live document contains only the report. iOS Safari prints a
-    // snapshot of the live DOM and re-snapshots it when the device is rotated in
-    // the print sheet; inline styles survive that, and because the app is still
-    // hidden, the re-snapshot can never show the "Saved Monitoring Records" list.
-    document.getElementById('print-report-root')?.remove();
-    const printRoot = document.createElement('div');
-    printRoot.id = 'print-report-root';
-    printRoot.innerHTML = reportHtml;
-    document.body.appendChild(printRoot);
-
-    const appRoot = document.getElementById('root');
-    appRoot?.style.setProperty('display', 'none', 'important');
+  const openReport = useCallback((r: MonitoringRecord) => {
+    setReportRecord(r);
+    // Keep the class on <body> while the modal is open (not only during print),
+    // so every print snapshot hides the record list even if iOS re-snapshots
+    // the page after the device is rotated in the print sheet. It only takes
+    // effect inside @media print, so the on-screen view is unaffected. It is
+    // removed by closeReport() (or by the unmount cleanup below).
     document.body.classList.add('printing-saved-report');
-    const originalTitle = document.title;
-    document.title = title;
+  }, []);
 
-    let restored = false;
+  const closeReport = useCallback(() => {
+    setReportRecord(null);
+    document.body.classList.remove('printing-saved-report');
+  }, []);
+
+  useEffect(() => {
+    return () => document.body.classList.remove('printing-saved-report');
+  }, []);
+
+  const handlePrintReport = useCallback(() => {
+    if (!reportRecord) return;
+    const originalTitle = document.title;
+    document.title = `FF_${reportRecord.shift_name}${reportRecord.record_date ? `_${reportRecord.record_date}` : ''}`;
+    // iOS Safari fires afterprint as soon as the print sheet OPENS; restoring
+    // the title then is harmless because printing-saved-report stays on <body>
+    // until the modal is closed, so the list stays hidden on every snapshot.
     const restore = () => {
-      if (restored) return;
-      restored = true;
-      document.getElementById('print-report-root')?.remove();
-      appRoot?.style.removeProperty('display');
-      document.body.classList.remove('printing-saved-report');
       document.title = originalTitle;
       window.removeEventListener('afterprint', restore);
-      window.removeEventListener('focus', restore);
-      document.removeEventListener('visibilitychange', onVisibility);
-      window.clearTimeout(safetyTimer);
     };
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') restore();
-    };
-    const safetyTimer = window.setTimeout(restore, 60_000);
-
-    // Desktop fires afterprint when the print dialog closes. iOS Safari fires
-    // afterprint as soon as the print sheet OPENS (and not reliably at all), so
-    // restoring on it would hide the report before the user rotates the device,
-    // and the next snapshot would print the app's record list instead. On iOS,
-    // restore only when the sheet closes (the window regains focus / becomes
-    // visible again) or after the safety timeout.
-    if (!isIOS()) {
-      window.addEventListener('afterprint', restore);
-    } else {
-      window.addEventListener('focus', restore);
-      document.addEventListener('visibilitychange', onVisibility);
-    }
-    window.setTimeout(() => window.print(), 250);
-  };
-
-  const handlePrintReport = (r: MonitoringRecord) => {
-    const reportHtml = renderToStaticMarkup(
-      <ShiftReport
-        shift={r.shift_name as Shift}
-        date={r.record_date}
-        hours={r.hours?.length ? r.hours : getActiveHours(r.shift_name as Shift, [])}
-        boardData={r.board_data}
-        notes={r.notes ?? ''}
-        sku={r.sku ?? ''}
-        downtimeEvents={r.downtime_snapshot ?? []}
-      />,
-    );
-    const title = `FF_${r.shift_name}${r.record_date ? `_${r.record_date}` : ''}`;
-
-    // On iOS (especially a home-screen standalone PWA) a popup is a dead end:
-    // there is no tab bar to get back to the app, and the popup's print output
-    // can be cut off. Print from the current page instead.
-    if (isIOS()) {
-      printReportInPage(reportHtml, title);
-      setMsg('Report sent to printer');
-      return;
-    }
-
-    // Desktop: open a brand-new window containing ONLY the report, with the
-    // app's full stylesheet inlined so its @media print rules (landscape page,
-    // table widths, header repeats) render the report exactly like the
-    // Monitoring page's Print Report.
-    const css = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
-      .map((el) => el.outerHTML)
-      .join('\n');
-
-    const win = window.open('', '_blank');
-    if (!win) {
-      printReportInPage(reportHtml, title);
-      setMsg('Report sent to printer');
-      return;
-    }
-    try {
-      const doc = win.document;
-      doc.open();
-      doc.write(`<!DOCTYPE html><html><head><title>${title}</title>${css}</head><body>${reportHtml}</body></html>`);
-      doc.close();
-    } catch {
-      try { win.close(); } catch { /* ignore */ }
-      printReportInPage(reportHtml, title);
-      setMsg('Report sent to printer');
-      return;
-    }
-    window.setTimeout(() => {
-      try {
-        win.focus();
-        win.print();
-      } catch { /* ignore */ }
-    }, 500);
-    win.addEventListener('afterprint', () => { try { win.close(); } catch { /* ignore */ } });
-    window.setTimeout(() => { try { win.close(); } catch { /* ignore */ } }, 120_000);
-    setMsg('Report sent to printer');
-  };
+    window.addEventListener('afterprint', restore);
+    window.setTimeout(restore, 60_000);
+    window.print();
+  }, [reportRecord]);
 
   return (
     <div>
@@ -213,7 +130,7 @@ export function SavedRecordsView() {
             title: "Actions",
             items: [
               "View — opens a read-only on-screen preview of the record (does not affect the Monitoring board).",
-              "Report — opens the browser print dialog so you can save the report as a PDF, identical to the Monitoring page's Print Report.",
+              "Print Report (inside the preview) — opens the browser print dialog so you can save the report as a PDF, identical to the Monitoring page's Print Report.",
               "History — shows the audit trail of who saved/edited the record and when.",
             ],
           },
@@ -312,11 +229,8 @@ export function SavedRecordsView() {
                     <td className="px-4 py-3 text-slate-600">{r.saved_by ?? '-'}</td>
                     <td className="px-4 py-3 text-slate-500 text-[12px]">{r.created_at ? new Date(r.created_at).toLocaleString() : '-'}</td>
                     <td className="px-4 py-3" style={{ whiteSpace: 'nowrap', display: 'flex', gap: 6 }}>
-                      <button type="button" className="tab-btn tab-btn-green" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => setReportRecord(r)} title="Preview the record on screen">
+                      <button type="button" className="tab-btn tab-btn-green" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => openReport(r)} title="Preview the record on screen">
                         <ExternalLink size={12} /> View
-                      </button>
-                      <button type="button" className="tab-btn tab-btn-blue" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => handlePrintReport(r)} title="Print the report as a PDF (same as Monitoring Print Report)">
-                        <Printer size={12} /> Report
                       </button>
                       <button type="button" className="tab-btn tab-btn-purple" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => handleOpenHistory(r)} title="View audit history">
                         <History size={12} /> History
@@ -337,11 +251,16 @@ export function SavedRecordsView() {
       </div>
 
       {reportRecord && (
-        <div className="modal-overlay" onClick={() => setReportRecord(null)}>
+        <div className="modal-overlay" onClick={closeReport}>
           <div className="modal-card report-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Saved Record — {reportRecord.shift_name} · {reportRecord.record_date} · {reportRecord.sku ?? 'No SKU'}</h2>
-              <button type="button" className="modal-close-btn" onClick={() => setReportRecord(null)} aria-label="Close">✕</button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button type="button" className="tab-btn tab-btn-blue" style={{ padding: '6px 12px', fontSize: 12 }} onClick={handlePrintReport} title="Print the report as a PDF (same as Monitoring Print Report)">
+                  <Printer size={14} /> Print Report
+                </button>
+                <button type="button" className="modal-close-btn" onClick={closeReport} aria-label="Close">✕</button>
+              </div>
             </div>
             <ShiftReport
               shift={reportRecord.shift_name as Shift}

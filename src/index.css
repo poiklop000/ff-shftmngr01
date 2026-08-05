@@ -1013,13 +1013,13 @@ tbody tr:hover { background-color: #eff6ff; }
     line-height: 1.35 !important;
   }
 
-  /* ---- Print: saved record report (Report button on the Saved Records page) ----
-     The handler swaps the live DOM: #root is hidden inline and the report is
-     appended to <body> as #print-report-root. These print rules are a fallback
-     for renderers that re-snapshot from the live DOM; the modal chrome rules
-     below handle printing while a record modal is open. */
-  body.printing-saved-report #root { display: none !important; }
-  body.printing-saved-report #print-report-root { display: block !important; }
+  /* ---- Print: saved record report (View modal on the Saved Records page) ----
+     The View modal reuses the Monitoring report modal classes, so the report
+     prints with the same rules below. printing-saved-report is added to <body>
+     while the modal is open (see SavedRecordsView.openReport) and is a fallback
+     for the :has() selector further down, in case the print engine re-snapshots
+     the live DOM (e.g. iOS rotates the device in the print sheet). */
+  body.printing-saved-report .saved-records-list { display: none !important; }
 
   /* The .shift-report table is sized for the analytics modal (min-width 1150px),
      which overflows the landscape print page and clips the right columns. Let

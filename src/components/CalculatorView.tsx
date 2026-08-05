@@ -6,6 +6,7 @@ import {
 } from '@/types';
 import { useAutoSelect, useEnterToNext } from '@/lib/ui';
 import { fetchOfsStatus, type OfsLiveStatus } from '@/lib/ofs';
+import { loadJobOverride, type JobOverride } from '@/lib/jobOverrides';
 import { PageHelp } from '@/components/PageHelp';
 
 const PRODUCT_REFRESH_MS = 5000;
@@ -37,6 +38,7 @@ const FIELD_IDS: Record<keyof CalcInputs, string> = {
 export function CalculatorView({ calc, onChange, onUpdate, onClear }: CalculatorViewProps) {
   const [clockTick, setClockTick] = useState(0);
   const [liveStatus, setLiveStatus] = useState<OfsLiveStatus | null>(null);
+  const [override, setOverride] = useState<JobOverride | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,7 +60,23 @@ export function CalculatorView({ calc, onChange, onUpdate, onClear }: Calculator
     };
   }, []);
 
-  const activeProduct = activeJobProduct(liveStatus);
+  const jobId = liveStatus?.job?.id ?? null;
+
+  // Apply a product-name correction saved on the Live / Analytics page so the
+  // calculator shows the same product the rest of the board uses.
+  useEffect(() => {
+    let cancelled = false;
+    setOverride(null);
+    if (jobId == null) return;
+    loadJobOverride(jobId)
+      .then((o) => {
+        if (!cancelled) setOverride(o);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [jobId]);
+
+  const activeProduct = override?.product_name?.trim() || activeJobProduct(liveStatus);
 
   const metrics = useMemo(() => {
     void clockTick;

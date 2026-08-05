@@ -78,31 +78,43 @@ interface JobContext {
 }
 
 // Find the active job snapshot captured just before the event started, so
-// alerts can show which product was running.
+// alerts can show which product was running. A user correction (job_overrides)
+// layered on the captured product name wins over the raw OFS order name.
 async function findJobContext(
   supabase: ReturnType<typeof getSupabase>,
   startEpoch: number,
 ): Promise<JobContext | null> {
   const { data } = await supabase
     .from("job_snapshots")
-    .select("product_name, order_name, sku")
+    .select("job_id, product_name, order_name, sku")
     .not("job_id", "is", null)
     .lte("capture_time", new Date(startEpoch).toISOString())
     .order("capture_time", { ascending: false })
     .limit(1);
   const row = data?.[0] as
-    | { product_name?: string | null; order_name?: string | null }
+    | { job_id?: number | null; product_name?: string | null; order_name?: string | null }
     | undefined;
   if (!row) return null;
+
+  let product: string | null = row.product_name ?? null;
+  if (row.job_id != null) {
+    const { data: override } = await supabase
+      .from("job_overrides")
+      .select("product_name")
+      .eq("job_id", row.job_id)
+      .maybeSingle();
+    if (override?.product_name) product = override.product_name;
+  }
+
   return {
-    product: row.product_name ?? null,
+    product,
     orderName: row.order_name ?? null,
   };
 }
 
 function productFact(ctx: JobContext | null): { title: string; value: string } | null {
-  if (ctx?.orderName) return { title: "Product:", value: ctx.orderName };
   if (ctx?.product) return { title: "Product:", value: ctx.product };
+  if (ctx?.orderName) return { title: "Product:", value: ctx.orderName };
   return null;
 }
 
@@ -509,7 +521,7 @@ Deno.serve(async (req: Request) => {
 
       // Job context (product for the alert) 
       const ctx = await findJobContext(supabase, evt.start_epoch);
-      const product = ctx?.orderName ?? ctx?.product;
+      const product = ctx?.product ?? ctx?.orderName;
 
       if (needsOccurred) {
         if (effectiveDurationMs < thresholdMs) {

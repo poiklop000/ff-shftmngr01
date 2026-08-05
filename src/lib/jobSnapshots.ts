@@ -29,6 +29,11 @@ export interface JobSnapshot {
  * line is stopped (cleaning/setup), so a job is counted as active only if it
  * was running or its produced count increased during the window. If no jobs
  * were active during that shift window, returns an empty array.
+ *
+ * Product names are layered with the user's Live-page corrections first
+ * (job_overrides.product_name wins over whatever OFS sent), so a corrected
+ * name shows here even when the captured snapshots still carry the raw OFS
+ * name.
  */
 export async function fetchJobsForShift(
   date: string,
@@ -92,6 +97,23 @@ export async function fetchJobsForShift(
   }
   if (byJob.size === 0) return [];
 
+  // User corrections from the Live page win over the snapshot names, so a
+  // corrected product (e.g. one not yet created in OFS) shows up here even
+  // though the captured snapshots still carry the raw OFS name.
+  const overrides = new Map<number, string>();
+  const { data: overrideRows, error: overrideErr } = await withTimeout(
+    supabase
+      .from('job_overrides')
+      .select('job_id, product_name')
+      .in('job_id', [...byJob.keys()]),
+    DB_TIMEOUT_MS,
+  );
+  if (overrideErr) throw new Error(overrideErr.message);
+  for (const o of (overrideRows ?? []) as Array<{ job_id: number; product_name: string | null }>) {
+    const name = o.product_name?.trim();
+    if (name) overrides.set(o.job_id, name);
+  }
+
   // Older snapshots may predate the run_state column; in that case fall back to
   // showing every distinct job rather than dropping them all.
   const anyRunState = rows.some((r) => !!r.run_state);
@@ -113,8 +135,10 @@ export async function fetchJobsForShift(
   const productLines: string[] = [];
   for (const jobRows of byJob.values()) {
     if (!isActive(jobRows)) continue;
+    const jobId = jobRows[0]!.job_id;
     const last = jobRows[jobRows.length - 1]!;
-    const product = last.order_name ?? last.product_name ?? last.sku ?? '';
+    const overridden = jobId != null ? overrides.get(jobId) : undefined;
+    const product = overridden ?? last.order_name ?? last.product_name ?? last.sku ?? '';
     if (!product.trim()) continue;
     productLines.push(product.trim());
   }

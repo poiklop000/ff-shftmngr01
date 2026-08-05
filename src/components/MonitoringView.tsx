@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Loader2, Save, FolderOpen, CheckCircle2, Package, FileDown, Printer, Plus } from 'lucide-react';
+import { Download, Loader2, Save, FolderOpen, CheckCircle2, Package, FileDown, Printer, Plus, RefreshCw } from 'lucide-react';
 import {
   filterByShiftWindow,
   getActiveHours,
@@ -113,6 +113,30 @@ export function MonitoringView({
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date, currentShift, customHours]);
+
+  // Explicit refresh re-syncs the SKUs card with the database — unlike the
+  // passive auto-populate above, this replaces the list, so a product corrected
+  // on the Live page shows up even if the card was already populated.
+  const refreshJobs = useCallback(async () => {
+    if (!date) {
+      setJobsError('Select a date first at the top of the board.');
+      return;
+    }
+    setJobsLoading(true);
+    setJobsError(null);
+    try {
+      const jobs = await fetchJobsForShift(date, currentShift, customHours);
+      if (jobs.length === 0) {
+        setJobsError('No active jobs captured for this shift.');
+        return;
+      }
+      onMetaChange(currentShift, 'sku', jobs.join('\n'));
+    } catch (err) {
+      setJobsError(err instanceof Error ? err.message : 'Failed to load jobs');
+    } finally {
+      setJobsLoading(false);
+    }
+  }, [date, currentShift, customHours, onMetaChange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -335,8 +359,9 @@ export function MonitoringView({
             title: "Active jobs (SKUs)",
             items: [
               "The products for the shift's active jobs auto-populate at the top of the board from the job snapshots captured in the database, but only while the card is empty.",
+              "Use Refresh next to SKUs to re-sync the card from the database at any time — this replaces the list and also applies any product name you corrected on the Live page.",
               "Each active job is an editable product name. Use Add product to add more, or ✕ to remove one. Products are saved with the record and included in the printed report.",
-              "Once you change the list by hand it won't be overwritten by the auto-populate.",
+              "Once you change the list by hand it won't be overwritten by the auto-populate (only by Refresh).",
               "If no products are listed, no snapshots were captured for that date and shift, or the line was not running.",
             ],
           },
@@ -385,6 +410,16 @@ export function MonitoringView({
           <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.3px', display: 'flex', alignItems: 'center', gap: 4 }}>
             <Package size={13} />
             SKUs:
+            <button
+              type="button"
+              onClick={refreshJobs}
+              disabled={jobsLoading}
+              title="Re-sync the products with the active jobs captured for the selected date and shift (applies Live-page corrections)"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 8, padding: '3px 8px', fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', backgroundColor: 'transparent', border: '1px solid currentColor', borderRadius: 6, cursor: jobsLoading ? 'default' : 'pointer', letterSpacing: '0.3px' }}
+            >
+              <RefreshCw size={11} className={jobsLoading ? 'animate-spin' : ''} />
+              Refresh
+            </button>
           </label>
 
           {/* Editable product list — hidden when printing so it doesn't render as textboxes */}

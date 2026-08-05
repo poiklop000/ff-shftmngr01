@@ -302,7 +302,8 @@ export default function App() {
         next.db[shift] = createEmptyShiftData(getDefaultRowCount(shift));
       }
       next.notes[shift] = '';
-      next.sku[shift] = '';
+      // The product list (SKUs) is intentionally kept — it is the shift's
+      // product info and is not part of the per-interval data being wiped.
       next.db[shift].date = '';
       return next;
     });

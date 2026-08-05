@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { withTimeout } from '@/lib/ui';
-import { getActiveHours, type Shift } from '@/types';
+import { getActiveHours, consoleTimeToShiftMinutes, type Shift } from '@/types';
 import { localDateTimeToEpoch } from '@/lib/downtime';
 
 const DB_TIMEOUT_MS = 15000;
@@ -125,15 +125,17 @@ export async function fetchJobsForShift(
 /**
  * Fetches job snapshots for the given date + shift window and returns a map of
  * row index -> rated speed (cans/hour) for the job that was running in that
- * hour interval. The values come from job_snapshots.rated_speed, which already
- * has any user correction from the Live page layered on top by
- * capture-active-jobs. Hours where the line was not running (idle/cleaning/
- * setup) are left out, so the Monitoring "Import Counter" can fill the Rated
- * Speed column only for hours the line actually produced.
+ * hour interval. The resolution is per job: each hour is assigned to the job
+ * with the most snapshots in it, and that job's user correction (job_overrides
+ * from the Live page) is applied when present — so a rated speed changed
+ * mid-run still shows up for the whole shift on import, not just for snapshots
+ * taken after the correction. When no override exists the snapshot's captured
+ * rated speed is used.
  *
- * When several distinct rated speeds appear within one hour (a job handover),
- * the value that appears most often wins. If a snapshot has no run_state data
- * (older captures), every hour with a non-null rated speed is filled instead,
+ * Hours where the line was not running (idle/cleaning/setup) are left out, so
+ * the Monitoring "Import Counter" can fill the Rated Speed column only for
+ * hours the line actually produced. If a snapshot has no run_state data (older
+ * captures), every hour with a non-null rated speed is filled instead,
  * mirroring fetchJobsForShift's fallback.
  */
 export async function fetchHourlyRatedSpeeds(
@@ -167,6 +169,7 @@ export async function fetchHourlyRatedSpeeds(
   interface RatedSpeedRow {
     capture_time: string;
     run_state: string | null;
+    job_id: number | null;
     rated_speed: number | null;
   }
 
@@ -178,7 +181,7 @@ export async function fetchHourlyRatedSpeeds(
     const { data, error } = await withTimeout(
       supabase
         .from('job_snapshots')
-        .select('capture_time, run_state, rated_speed')
+        .select('capture_time, run_state, job_id, rated_speed')
         .gte('capture_time', startIso)
         .lt('capture_time', endIso)
         .order('capture_time', { ascending: true })
@@ -191,6 +194,26 @@ export async function fetchHourlyRatedSpeeds(
     if (page.length < PAGE) break;
   }
   if (all.length === 0) return {};
+
+  // User corrections keyed by job. When a job has one, it wins over whatever
+  // rated speed the snapshots recorded at capture time.
+  const jobIds = new Set<number>();
+  for (const r of all) if (r.job_id != null) jobIds.add(r.job_id);
+
+  const overrides = new Map<number, number>();
+  if (jobIds.size > 0) {
+    const { data: ovr, error: ovrErr } = await withTimeout(
+      supabase
+        .from('job_overrides')
+        .select('job_id, rated_speed')
+        .in('job_id', [...jobIds]),
+      DB_TIMEOUT_MS,
+    );
+    if (ovrErr) throw new Error(ovrErr.message);
+    for (const o of (ovr ?? []) as Array<{ job_id: number; rated_speed: number | null }>) {
+      if (o.rated_speed != null && o.rated_speed > 0) overrides.set(o.job_id, o.rated_speed);
+    }
+  }
 
   const anyRunState = all.some((r) => !!r.run_state);
   const shiftStartMin = timeStrToMinutes(shiftStartStr);
@@ -206,7 +229,7 @@ export async function fetchHourlyRatedSpeeds(
     };
   });
 
-  const buckets = new Map<number, number[]>();
+  const buckets = new Map<number, Array<{ job_id: number | null; rated_speed: number }>>();
   for (const row of all) {
     if (row.rated_speed == null || row.rated_speed <= 0) continue;
     // Only fill hours the line was actually running. If the snapshots predate
@@ -220,23 +243,45 @@ export async function fetchHourlyRatedSpeeds(
     const idx = intervals.findIndex((iv) => min >= iv.startMin && min < iv.endMin);
     if (idx < 0) continue;
     const list = buckets.get(idx) ?? [];
-    list.push(row.rated_speed);
+    list.push({ job_id: row.job_id, rated_speed: row.rated_speed });
     buckets.set(idx, list);
   }
 
   const result: Record<number, number> = {};
-  for (const [idx, speeds] of buckets) {
-    const counts = new Map<number, number>();
-    for (const s of speeds) counts.set(s, (counts.get(s) ?? 0) + 1);
-    let best = 0;
-    let bestCount = 0;
-    for (const [s, c] of counts) {
-      if (c > bestCount) {
-        best = s;
-        bestCount = c;
+  for (const [idx, entries] of buckets) {
+    // The job with the most snapshots in this hour is the one that ran it.
+    const jobCounts = new Map<number | null, number>();
+    for (const e of entries) jobCounts.set(e.job_id, (jobCounts.get(e.job_id) ?? 0) + 1);
+    let bestJob: number | null = null;
+    let bestJobCount = 0;
+    for (const [jid, c] of jobCounts) {
+      if (c > bestJobCount) {
+        bestJob = jid;
+        bestJobCount = c;
       }
     }
-    if (best > 0) result[idx] = best;
+
+    // Most common snapshot rated speed among that job's rows (used when the
+    // job has no override).
+    let fallback = 0;
+    if (bestJob != null) {
+      const speedCounts = new Map<number, number>();
+      for (const e of entries) {
+        if (e.job_id === bestJob) speedCounts.set(e.rated_speed, (speedCounts.get(e.rated_speed) ?? 0) + 1);
+      }
+      let best = 0;
+      let bestCount = 0;
+      for (const [s, c] of speedCounts) {
+        if (c > bestCount) {
+          best = s;
+          bestCount = c;
+        }
+      }
+      fallback = best;
+    }
+
+    const finalSpeed = bestJob != null && overrides.has(bestJob) ? overrides.get(bestJob)! : fallback;
+    if (finalSpeed > 0) result[idx] = finalSpeed;
   }
   return result;
 }

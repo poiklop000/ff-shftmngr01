@@ -218,10 +218,10 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
     [summary, currentShift, customHours, date],
   );
 
-  // Each OFS hourly entry is labelled with the hour it covers, so the 18:00
-  // bucket is the output produced between 18:00 and 19:00.
+  // Each OFS hourly entry is labelled with the hour it starts at, so the 18:00
+  // bucket is the output produced between 18:00 and 19:00. Show it as a range.
   const productionRows = useMemo(
-    () => shiftSummary.map((e) => ({ hour: e.hour, output: e.in })),
+    () => shiftSummary.map((e) => ({ hour: hourRangeLabel(e.hour), output: e.in })),
     [shiftSummary],
   );
 
@@ -657,8 +657,18 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
                         <td className="px-4 py-3 text-center font-medium text-slate-700 whitespace-nowrap">{row.hour}</td>
                         <td className="px-4 py-3 text-center font-semibold text-slate-700 whitespace-nowrap">{ratedSpeed > 0 ? ratedSpeed.toLocaleString() : '-'}</td>
                         <td className="px-4 py-3 text-center font-semibold text-slate-700 whitespace-nowrap">{row.output.toLocaleString()}</td>
-                        <td className="px-4 py-3 text-center font-bold text-slate-700 whitespace-nowrap">
-                          {ratedSpeed > 0 ? `${((row.output / ratedSpeed) * 100).toFixed(2)}%` : '-'}
+                        <td className="px-4 py-3 text-center whitespace-nowrap">
+                          {(() => {
+                            const oee = ratedSpeed > 0 ? (row.output / ratedSpeed) * 100 : 0;
+                            const oeeClass = ratedSpeed > 0
+                              ? oee >= 70 ? 'oee-pass' : 'oee-fail'
+                              : 'oee-neutral';
+                            return (
+                              <span className={`oee-badge ${oeeClass}`}>
+                                {ratedSpeed > 0 ? `${oee.toFixed(2)}%` : '0.00%'}
+                              </span>
+                            );
+                          })()}
                         </td>
                       </tr>
                     ))}
@@ -681,6 +691,17 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
       </div>
     </div>
   );
+}
+
+function hourRangeLabel(hour: string): string {
+  const [hStr, mStr] = hour.split(':');
+  const h = Number(hStr);
+  const m = Number(mStr);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return hour;
+  const total = ((h * 60 + m + 60) % 1440 + 1440) % 1440;
+  const eh = Math.floor(total / 60);
+  const em = total % 60;
+  return `${hour} - ${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
 }
 
 function StatusCard({

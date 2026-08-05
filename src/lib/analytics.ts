@@ -32,18 +32,29 @@ export async function fetchJobsInRange(
   const startIso = new Date(localDateTimeToEpoch(startAt)).toISOString();
   const endIso = new Date(localDateTimeToEpoch(endAt)).toISOString();
 
-  const { data, error } = await withTimeout(
-    supabase
-      .from('job_snapshots')
-      .select('id, capture_time, job_id, product_name, sku, order_name, quantity, produced, progress_pct, run_state, crew_name, shift_name')
-      .gte('capture_time', startIso)
-      .lt('capture_time', endIso)
-      .order('capture_time', { ascending: true }),
-    DB_TIMEOUT_MS,
-  );
-
-  if (error) throw new Error(error.message);
-  return (data as JobSnapshotRow[]) ?? [];
+  // Snapshots are captured continuously (up to once a minute), so a multi-day
+  // range can hold thousands of rows. Supabase caps a single request at 1000
+  // rows, so page through the whole range — otherwise the oldest 1000 rows are
+  // returned and jobs near the end of the range are silently missing.
+  const all: JobSnapshotRow[] = [];
+  const PAGE = 1000;
+  for (let offset = 0; offset < 100000; offset += PAGE) {
+    const { data, error } = await withTimeout(
+      supabase
+        .from('job_snapshots')
+        .select('id, capture_time, job_id, product_name, sku, order_name, quantity, produced, progress_pct, run_state, crew_name, shift_name')
+        .gte('capture_time', startIso)
+        .lt('capture_time', endIso)
+        .order('capture_time', { ascending: true })
+        .range(offset, offset + PAGE - 1),
+      DB_TIMEOUT_MS,
+    );
+    if (error) throw new Error(error.message);
+    const page = (data as JobSnapshotRow[]) ?? [];
+    all.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return all;
 }
 
 /**

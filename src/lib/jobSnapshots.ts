@@ -59,18 +59,28 @@ export async function fetchJobsForShift(
   const startIso = new Date(localDateTimeToEpoch(`${date}T${shiftStartStr}`)).toISOString();
   const endIso = new Date(localDateTimeToEpoch(`${endDate}T${shiftEndStr}`)).toISOString();
 
-  const { data, error } = await withTimeout(
-    supabase
-      .from('job_snapshots')
-      .select('capture_time, job_id, product_name, sku, order_name, quantity, produced, run_state')
-      .gte('capture_time', startIso)
-      .lt('capture_time', endIso)
-      .order('capture_time', { ascending: true }),
-    DB_TIMEOUT_MS,
-  );
-
-  if (error) throw new Error(error.message);
-  const rows = (data as JobSnapshot[]) ?? [];
+  // Snapshots can be captured up to once a minute, so a long or overnight shift
+  // may exceed Supabase's 1000-row-per-request cap. Page through the window so
+  // no snapshots (and therefore no jobs) are silently dropped.
+  const all: JobSnapshot[] = [];
+  const PAGE = 1000;
+  for (let offset = 0; offset < 100000; offset += PAGE) {
+    const { data, error } = await withTimeout(
+      supabase
+        .from('job_snapshots')
+        .select('capture_time, job_id, product_name, sku, order_name, quantity, produced, run_state')
+        .gte('capture_time', startIso)
+        .lt('capture_time', endIso)
+        .order('capture_time', { ascending: true })
+        .range(offset, offset + PAGE - 1),
+      DB_TIMEOUT_MS,
+    );
+    if (error) throw new Error(error.message);
+    const page = (data as JobSnapshot[]) ?? [];
+    all.push(...page);
+    if (page.length < PAGE) break;
+  }
+  const rows = all;
   if (rows.length === 0) return [];
 
   const byJob = new Map<number, JobSnapshot[]>();

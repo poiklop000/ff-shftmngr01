@@ -103,6 +103,17 @@ function getSupabase() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
+// Respects the master OFS kill switch. When `ofs_enabled` is "false" the cron
+// invocation short-circuits before making any request to OFS.
+async function isOfsEnabled(supabase: ReturnType<typeof getSupabase>): Promise<boolean> {
+  const { data } = await supabase
+    .from("app_config")
+    .select("value")
+    .eq("key", "ofs_enabled")
+    .maybeSingle();
+  return data?.value?.toLowerCase() !== "false";
+}
+
 async function fetchLiveStatus(): Promise<OfsLiveStatus> {
   const user = Deno.env.get("OFS_USER");
   const pass = Deno.env.get("OFS_PASS");
@@ -195,6 +206,10 @@ Deno.serve(async (req: Request) => {
   }
   try {
     const supabase = getSupabase();
+    if (!(await isOfsEnabled(supabase))) {
+      console.log(`[capture-active-jobs] ${new Date().toISOString()} skipped — OFS disabled`);
+      return json({ ok: true, skipped: true, reason: "ofs_disabled" });
+    }
     const status = await fetchLiveStatus();
     const snapshot = buildSnapshot(status);
 

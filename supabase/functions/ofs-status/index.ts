@@ -1,4 +1,11 @@
-// ofs-status v3 — events discovery
+// ofs-status v4 — events discovery + master OFS kill switch
+//
+// All browser-side OFS reads flow through this function, so it also enforces
+// the master `ofs_enabled` flag (app_config). When the flag is "false" the
+// proxy returns 503 WITHOUT contacting the OFS server — this is what makes the
+// one-click kill switch stop ALL live data pulls from the phone app.
+import { createClient } from "npm:@supabase/supabase-js@2";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
@@ -83,6 +90,22 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+function getSupabase() {
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) throw new Error("Supabase env not configured");
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
+async function isOfsEnabled(supabase: ReturnType<typeof getSupabase>): Promise<boolean> {
+  const { data } = await supabase
+    .from("app_config")
+    .select("value")
+    .eq("key", "ofs_enabled")
+    .maybeSingle();
+  return data?.value?.toLowerCase() !== "false";
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -93,6 +116,14 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    const supabase = getSupabase();
+    if (!(await isOfsEnabled(supabase))) {
+      return json(
+        { error: "OFS data collection is disabled", code: "ofs_disabled" },
+        503,
+      );
+    }
+
     const user = Deno.env.get("OFS_USER");
     const pass = Deno.env.get("OFS_PASS");
     if (!user || !pass) {

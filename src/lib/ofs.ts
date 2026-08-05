@@ -187,6 +187,17 @@ const HOUR_SUMMARY_CACHE_TTL_MS = 30_000;
 
 const OFS_FETCH_TIMEOUT_MS = 15000;
 
+// Master kill switch short-circuit. When the ofs-status edge function reports
+// the OFS data collection is disabled (503), remember it locally for a short
+// window so the live polling screens stop hammering the endpoint. The window
+// lets devices auto-recover within ~30s once an admin re-enables OFS.
+const OFS_DISABLED_WINDOW_MS = 30_000;
+let ofsDisabledUntil = 0;
+
+export function isOfsDisabled(): boolean {
+  return Date.now() < ofsDisabledUntil;
+}
+
 /**
  * Fetches a URL from the OFS edge function with a 15s timeout so the UI never
  * sits on a loading spinner indefinitely if the OFS system is unreachable.
@@ -196,6 +207,9 @@ async function fetchOfsRaw(
   url: string,
   signal?: AbortSignal,
 ): Promise<{ data?: unknown; error?: string }> {
+  if (isOfsDisabled()) {
+    throw new Error('OFS data collection is disabled');
+  }
   const ctrl = new AbortController();
   const onExternalAbort = () => ctrl.abort();
   if (signal) {
@@ -214,6 +228,9 @@ async function fetchOfsRaw(
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
+      if (res.status === 503 && (body?.code === 'ofs_disabled' || /disabled/i.test(body?.error ?? ''))) {
+        ofsDisabledUntil = Date.now() + OFS_DISABLED_WINDOW_MS;
+      }
       throw new Error(body.error || `Request failed (${res.status})`);
     }
     return (await res.json()) as { data?: unknown; error?: string };

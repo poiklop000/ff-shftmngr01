@@ -113,6 +113,17 @@ function getSupabase() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
+// Respects the master OFS kill switch. When `ofs_enabled` is "false" the sync
+// short-circuits before making any request to OFS.
+async function isOfsEnabled(supabase: ReturnType<typeof getSupabase>): Promise<boolean> {
+  const { data } = await supabase
+    .from("app_config")
+    .select("value")
+    .eq("key", "ofs_enabled")
+    .maybeSingle();
+  return data?.value?.toLowerCase() !== "false";
+}
+
 function getOfsAuth(): string {
   const user = Deno.env.get("OFS_USER");
   const pass = Deno.env.get("OFS_PASS");
@@ -353,6 +364,10 @@ Deno.serve(async (req: Request) => {
   }
   try {
     const supabase = getSupabase();
+    if (!(await isOfsEnabled(supabase))) {
+      console.log(`[sync-spans-history] ${new Date().toISOString()} skipped — OFS disabled`);
+      return json({ ok: true, skipped: true, reason: "ofs_disabled" });
+    }
 
     // 1. Fetch downtime history from express/spans
     const spans = await fetchSpansHistory();

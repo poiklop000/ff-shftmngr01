@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { KeyRound, Trash2, Ban, Check, UserPlus, RefreshCw, Shield, Search, Users, BellRing, Database, History, Loader2 } from 'lucide-react';
 import { AlertHistory } from '@/components/AlertHistory';
 import { AlertsConfig } from '@/components/AlertsConfig';
+import { OfsKillSwitch } from '@/components/OfsKillSwitch';
 import { ACCESSIBLE_PAGE_OPTIONS, roleDefaultPages, userAllowedViews, type View } from '@/lib/access';
 import {
   adminCreateUser,
@@ -288,6 +289,10 @@ export function AdminView({ currentUserId, syncing = false, syncMessage, syncErr
           Manage accounts and which pages each user can open, configure Microsoft Teams alerts and
           refresh intervals, pull the latest data from OFS, and review alert history. Only admins can see this page.
         </div>
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <OfsKillSwitch />
       </div>
 
       {error && (

@@ -178,7 +178,6 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
   useEffect(() => {
     if (!date) return;
     let cancelled = false;
-    let timer: number | undefined;
 
     const loadBoard = async () => {
       setBoardLoading(true);
@@ -203,7 +202,7 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
     };
 
     loadBoard();
-    timer = window.setInterval(loadBoard, summaryRefreshMs);
+    const timer = window.setInterval(loadBoard, summaryRefreshMs);
     return () => {
       cancelled = true;
       if (timer) window.clearInterval(timer);

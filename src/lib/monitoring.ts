@@ -152,7 +152,11 @@ export async function buildActiveJobSnapshot(status: OfsLiveStatus | null): Prom
   const override = jobId != null ? await loadJobOverride(jobId).catch(() => null) : null;
 
   const counts = job.counts ?? {};
-  const out = counts.out ?? 0;
+  // "Produced" = filler output: units through the line / units in to the
+  // process, matching the Live page. `counts.out` is the date-coder counter,
+  // which can freeze when a downstream machine stops while the filler keeps
+  // producing.
+  const out = counts.through || status.process?.unitsin?.value || counts.out || 0;
   const qty = job.quantity ?? 0;
   const ofsRated = job.metadata?.ratedSpeed ? parseInt(job.metadata.ratedSpeed, 10) : 0;
   const ratedSpeed = override?.rated_speed ?? ofsRated;

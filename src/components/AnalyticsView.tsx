@@ -1,11 +1,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { BarChart3, Loader2, FileDown, RefreshCw, Calendar, Clock, MessageSquare, Pencil, Check, X, RotateCcw, AlertTriangle } from 'lucide-react';
 import { PageHelp } from '@/components/PageHelp';
+import { CheckboxDropdown } from '@/components/CheckboxDropdown';
 import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
 import { fetchDowntimeBetween, formatDuration, localDateTimeToEpoch, type DowntimeComment, type DowntimeEvent } from '@/lib/downtime';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
 import {
   fetchJobsInRange,
+  fetchLatestJobRates,
   type JobSnapshotRow,
 } from '@/lib/analytics';
 import { fetchOverridesForJobs, saveJobOverride, deleteJobOverride, type JobOverride } from '@/lib/jobOverrides';
@@ -44,13 +46,41 @@ function dateOffset(days: number): string {
   return toDateStr(d);
 }
 
+// Which job was running at the start of the given hour. Snapshots are sorted
+// oldest-first; the first snapshot captured within the hour is the job at the
+// hour's start, otherwise the job from the most recent snapshot before it.
+function activeJobForHour(hourStartEpoch: number, snapshots: JobSnapshotRow[]): number | null {
+  const hourEnd = hourStartEpoch + 3600000;
+  let lastBefore: number | null = null;
+  for (const row of snapshots) {
+    const t = new Date(row.capture_time).getTime();
+    if (t >= hourStartEpoch && t < hourEnd) return row.job_id;
+    if (t < hourStartEpoch) lastBefore = row.job_id;
+    if (t >= hourEnd) break;
+  }
+  return lastBefore;
+}
+
+// Which job was running at a specific moment. Downtime events don't carry a
+// real job id (OFS reports jobId 0), so the job is derived from the most recent
+// job snapshot at or before the event's start time.
+function jobAtEpoch(epoch: number, snapshots: JobSnapshotRow[]): number | null {
+  let last: number | null = null;
+  for (const row of snapshots) {
+    if (new Date(row.capture_time).getTime() <= epoch) last = row.job_id;
+    else break;
+  }
+  return last;
+}
+
 const ANALYTICS_PERSIST_KEY = 'ff_analytics_persist_v1';
 
 interface AnalyticsPersistState {
   startAt: string;
   endAt: string;
   textFilter: string;
-  typeFilter: string;
+  typeFilters: string[];
+  jobFilters: number[];
   loadedRange: { start: string; end: string } | null;
 }
 
@@ -59,7 +89,8 @@ function defaultAnalyticsPersist(): AnalyticsPersistState {
     startAt: `${dateOffset(-6)}T00:00`,
     endAt: `${dateOffset(0)}T23:59`,
     textFilter: '',
-    typeFilter: 'All',
+    typeFilters: [],
+    jobFilters: [],
     loadedRange: null,
   };
 }
@@ -74,7 +105,12 @@ function loadAnalyticsPersist(): AnalyticsPersistState {
       startAt: typeof parsed.startAt === 'string' ? parsed.startAt : fallback.startAt,
       endAt: typeof parsed.endAt === 'string' ? parsed.endAt : fallback.endAt,
       textFilter: typeof parsed.textFilter === 'string' ? parsed.textFilter : '',
-      typeFilter: typeof parsed.typeFilter === 'string' ? parsed.typeFilter : 'All',
+      typeFilters: Array.isArray(parsed.typeFilters)
+        ? parsed.typeFilters.filter((t): t is string => typeof t === 'string')
+        : [],
+      jobFilters: Array.isArray(parsed.jobFilters)
+        ? parsed.jobFilters.filter((j): j is number => typeof j === 'number' && Number.isFinite(j))
+        : [],
       loadedRange:
         parsed.loadedRange &&
         typeof parsed.loadedRange.start === 'string' &&
@@ -126,7 +162,8 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
   const [startAt, setStartAt] = useState(persisted.startAt);
   const [endAt, setEndAt] = useState(persisted.endAt);
   const [textFilter, setTextFilter] = useState(persisted.textFilter);
-  const [typeFilter, setTypeFilter] = useState(persisted.typeFilter);
+  const [typeFilters, setTypeFilters] = useState<string[]>(persisted.typeFilters);
+  const [jobFilters, setJobFilters] = useState<number[]>(persisted.jobFilters);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<AnalyticsData | null>(null);
@@ -134,6 +171,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
   const [loadedRange, setLoadedRange] = useState<{ start: string; end: string } | null>(persisted.loadedRange);
   const [expandedDowntimeId, setExpandedDowntimeId] = useState<number | null>(null);
   const [overrides, setOverrides] = useState<Record<number, JobOverride>>({});
+  const [latestRates, setLatestRates] = useState<Record<number, number>>({});
   const [editingJobId, setEditingJobId] = useState<number | null>(null);
   const [draftProduct, setDraftProduct] = useState('');
   const [draftSpeed, setDraftSpeed] = useState('');
@@ -144,11 +182,11 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
   // page remembers them when the user navigates away and comes back.
   useEffect(() => {
     try {
-      localStorage.setItem(ANALYTICS_PERSIST_KEY, JSON.stringify({ startAt, endAt, textFilter, typeFilter, loadedRange }));
+      localStorage.setItem(ANALYTICS_PERSIST_KEY, JSON.stringify({ startAt, endAt, textFilter, typeFilters, jobFilters, loadedRange }));
     } catch {
       // ignore storage failures
     }
-  }, [startAt, endAt, textFilter, typeFilter, loadedRange]);
+  }, [startAt, endAt, textFilter, typeFilters, jobFilters, loadedRange]);
 
   const loadData = useCallback(async (start: string, end: string) => {
     if (!start || !end) {
@@ -187,6 +225,18 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
       const ovrMap: Record<number, JobOverride> = {};
       for (const o of ovrRows) ovrMap[o.job_id] = o;
       setOverrides(ovrMap);
+
+      // Current rated speed per job (latest capture across all time, not just
+      // the range) so the table reflects where each job stands today.
+      const latestRates = await fetchLatestJobRates(jobIds);
+      setLatestRates(latestRates);
+
+      // If specific jobs are selected but don't appear in the new range, drop
+      // them so the page doesn't keep an empty filter.
+      setJobFilters((prev) => {
+        const stillValid = prev.filter((id) => jobIds.includes(id));
+        return stillValid.length === prev.length ? prev : stillValid;
+      });
 
       setLoadedRange({ start, end });
     } catch (err) {
@@ -314,7 +364,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
         quantity: last.quantity ?? 0,
         produced: last.produced ?? 0,
         progressPct: last.progress_pct ?? 0,
-        ratedSpeed: ovr?.rated_speed ?? (last.rated_speed ?? 0),
+        ratedSpeed: ovr?.rated_speed ?? (latestRates[jobId] ?? last.rated_speed ?? 0),
         hasOverride: !!ovr,
         firstCapture: first.capture_time,
         lastCapture: last.capture_time,
@@ -324,13 +374,52 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
     }
     list.sort((a, b) => a.jobId - b.jobId);
     return list;
-  }, [data, overrides]);
+  }, [data, overrides, latestRates]);
+
+  // When one or more jobs are selected, the whole page (jobs, downtime, hourly
+  // production, result cards, exports) narrows down to just those jobs.
+  const visibleJobs = useMemo(
+    () => (jobFilters.length === 0 ? jobs : jobs.filter((j) => jobFilters.includes(j.jobId))),
+    [jobs, jobFilters],
+  );
+
+  const visibleHourly = useMemo(() => {
+    if (!data) return [];
+    if (jobFilters.length === 0) return data.hourly;
+    return data.hourly.filter((h) => jobFilters.includes(activeJobForHour(h.start, data.jobs) ?? -1));
+  }, [data, jobFilters]);
+
+  // Which job (and therefore which rated speed) was running during each hour.
+  // The job's rated speed is the fixed value from the Jobs table (e.g. 24000),
+  // with any user correction applied. Hours with no job fall back to the OFS
+  // per-hour rate.
+  const hourJobRates = useMemo(() => {
+    const rates: Record<number, number> = {};
+    if (!data) return rates;
+    const jobRate = new Map(jobs.map((j) => [j.jobId, j.ratedSpeed]));
+    for (const h of data.hourly) {
+      const jobId = activeJobForHour(h.start, data.jobs);
+      if (jobId !== null && jobRate.has(jobId)) {
+        rates[h.start] = jobRate.get(jobId)!;
+      }
+    }
+    return rates;
+  }, [data, jobs]);
 
   const downtime = useMemo(() => {
     if (!data) return [];
     let list = data.downtime;
-    if (typeFilter !== 'All') {
-      list = list.filter((e) => (e.downtime_type ?? '') === typeFilter);
+    if (jobFilters.length > 0) {
+      // Downtime events rarely carry a usable job id (OFS reports 0), so match
+      // on the job that was running when each event started.
+      list = list.filter(
+        (e) =>
+          jobFilters.includes(e.job_id ?? -1) ||
+          jobFilters.includes(jobAtEpoch(e.start_epoch, data.jobs) ?? -1),
+      );
+    }
+    if (typeFilters.length > 0) {
+      list = list.filter((e) => typeFilters.includes(e.downtime_type ?? ''));
     }
     if (textFilter.trim()) {
       const q = textFilter.trim().toLowerCase();
@@ -341,7 +430,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
       );
     }
     return list;
-  }, [data, typeFilter, textFilter]);
+  }, [data, typeFilters, textFilter, jobFilters]);
 
   const downtimeTypes = useMemo(() => {
     if (!data) return [];
@@ -353,12 +442,13 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
     const longestDowntimeMs = downtime.reduce((max, e) => Math.max(max, e.duration_ms ?? 0), 0);
     const days = loadedRange ? Math.max(1, Math.round((new Date(loadedRange.end).getTime() - new Date(loadedRange.start).getTime()) / 86400000) + 1) : 1;
     const uptimePct = Math.max(0, Math.min(100, 100 - (totalDowntimeMs / (days * 86400000)) * 100));
-    const totalOut = (data?.hourly ?? []).reduce((sum, h) => sum + h.out, 0);
+    const totalOut = visibleHourly.reduce((sum, h) => sum + h.in, 0);
     let effSum = 0;
     let effCount = 0;
-    for (const h of data?.hourly ?? []) {
-      if (h.rated > 0) {
-        effSum += (h.out / h.rated) * 100;
+    for (const h of visibleHourly) {
+      const rated = hourJobRates[h.start] ?? h.rated;
+      if (rated > 0) {
+        effSum += (h.in / rated) * 100;
         effCount++;
       }
     }
@@ -370,11 +460,11 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
       totalOut,
       avgEfficiency: effCount > 0 ? effSum / effCount : 0,
     };
-  }, [downtime, data, loadedRange]);
+  }, [downtime, loadedRange, hourJobRates, visibleHourly]);
 
   const maxHourOut = useMemo(
-    () => (data?.hourly ?? []).reduce((m, h) => Math.max(m, h.out), 0),
-    [data],
+    () => visibleHourly.reduce((m, h) => Math.max(m, h.out), 0),
+    [visibleHourly],
   );
 
   const downtimeByCategory = useMemo(() => {
@@ -394,20 +484,19 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
   const maxCategoryMs = downtimeByCategory.reduce((m, c) => Math.max(m, c.ms), 0);
 
   const hourLabels = useMemo(() => {
-    if (!data) return [];
-    return data.hourly.map((h) => {
+    return visibleHourly.map((h) => {
       const datePart = h.startText ? h.startText.slice(0, 10) : '';
       const dateShort = datePart ? `${datePart.slice(8, 10)}/${datePart.slice(5, 7)}` : '';
       return dateShort ? `${dateShort} ${h.hour}` : h.hour;
     });
-  }, [data]);
+  }, [visibleHourly]);
 
   const handleExportAll = () => {
     if (!data) return;
     const rows: (string | number | null | undefined)[][] = [];
     rows.push(['SECTION', 'JOBS']);
     rows.push(['Job', 'Product', 'SKU', 'Rated Speed', 'Target', 'Produced', 'Progress %', 'First Capture', 'Last Capture', 'Runs']);
-    for (const j of jobs) {
+    for (const j of visibleJobs) {
       rows.push([`Job ${j.jobId}`, j.product, j.sku, j.ratedSpeed, j.quantity, j.produced, j.progressPct.toFixed(1), aucklandTime(j.firstCapture), aucklandTime(j.lastCapture), j.runs]);
     }
     rows.push(['SECTION', 'DOWNTIME']);
@@ -417,9 +506,9 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
     }
     rows.push(['SECTION', 'HOURLY PRODUCTION']);
     rows.push(['Date', 'Hour', 'In', 'Out', 'Rated']);
-    for (const h of data.hourly) {
+    for (const h of visibleHourly) {
       const datePart = h.startText ? h.startText.slice(0, 10) : '';
-      rows.push([datePart, h.hour, h.in, h.out, h.rated]);
+      rows.push([datePart, h.hour, h.in, h.out, hourJobRates[h.start] ?? h.rated]);
     }
     downloadCsv(`analytics_${loadedRange?.start}_to_${loadedRange?.end}.csv`, ['Analytics Export'], rows);
     setMsg('CSV exported');
@@ -540,29 +629,35 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
             <button type="button" className="tab-btn tab-btn-blue" onClick={handleExportAll}>
               <FileDown size={14} /> Export All CSV
             </button>
+            <CheckboxDropdown
+              label="Jobs"
+              options={jobs.map((j) => ({ value: String(j.jobId), label: `Job ${j.jobId} — ${j.product}` }))}
+              selected={jobFilters.map(String)}
+              onChange={(values) => setJobFilters(values.map(Number))}
+            />
           </div>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 15 }}>
             <div className="card card-blue">
-              <div className="card-row"><span>Total Downtime</span><span className="card-value">{formatDuration(totalDowntimeMs)}</span></div>
+              <div className="card-row stat-row"><span>Total Downtime:</span><span className="card-value">{formatDuration(totalDowntimeMs)}</span></div>
             </div>
             <div className="card card-blue">
-              <div className="card-row"><span>Downtime Events</span><span className="card-value">{downtimeCount.toLocaleString()}</span></div>
+              <div className="card-row stat-row"><span>Downtime Events:</span><span className="card-value">{downtimeCount.toLocaleString()}</span></div>
             </div>
             <div className="card card-green">
-              <div className="card-row"><span>Total Output</span><span className="card-value">{totalOut.toLocaleString()}</span></div>
+              <div className="card-row stat-row"><span>Total Output:</span><span className="card-value">{totalOut.toLocaleString()}</span></div>
             </div>
             <div className="card card-green">
-              <div className="card-row"><span>Avg Efficiency</span><span className="card-value">{avgEfficiency.toFixed(1)}%</span></div>
+              <div className="card-row stat-row"><span>Avg Efficiency:</span><span className="card-value">{avgEfficiency.toFixed(2)}%</span></div>
             </div>
             <div className="card card-teal">
-              <div className="card-row"><span>Distinct Jobs</span><span className="card-value">{jobs.length}</span></div>
+              <div className="card-row stat-row"><span>Distinct Jobs:</span><span className="card-value">{visibleJobs.length}</span></div>
             </div>
             <div className="card card-teal">
-              <div className="card-row"><span>Longest Downtime</span><span className="card-value">{formatDuration(longestDowntimeMs)}</span></div>
+              <div className="card-row stat-row"><span>Longest Downtime:</span><span className="card-value">{formatDuration(longestDowntimeMs)}</span></div>
             </div>
             <div className="card card-teal">
-              <div className="card-row"><span>Uptime (est.)</span><span className="card-value">{uptimePct.toFixed(1)}%</span></div>
+              <div className="card-row stat-row"><span>Uptime (est.):</span><span className="card-value">{uptimePct.toFixed(1)}%</span></div>
             </div>
           </div>
 
@@ -578,7 +673,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
                   downloadCsv(
                     `analytics_jobs_${loadedRange?.start}_to_${loadedRange?.end}.csv`,
                     ['Job', 'Product', 'SKU', 'Rated Speed', 'Target', 'Produced', 'Progress %', 'First Capture', 'Last Capture', 'Shifts', 'Runs'],
-                    jobs.map((j) => [`Job ${j.jobId}`, j.product, j.sku, j.ratedSpeed, j.quantity, j.produced, j.progressPct.toFixed(1), aucklandTime(j.firstCapture), aucklandTime(j.lastCapture), j.shifts.join(' | '), j.runs]),
+                    visibleJobs.map((j) => [`Job ${j.jobId}`, j.product, j.sku, j.ratedSpeed, j.quantity, j.produced, j.progressPct.toFixed(1), aucklandTime(j.firstCapture), aucklandTime(j.lastCapture), j.shifts.join(' | '), j.runs]),
                   );
                   setMsg('Jobs CSV exported');
                 }}
@@ -586,7 +681,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
                 <FileDown size={12} /> CSV
               </button>
             </h3>
-            {jobs.length === 0 ? (
+            {visibleJobs.length === 0 ? (
               <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500, padding: 8 }}>
                 No jobs captured in this range.
               </div>
@@ -608,7 +703,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {jobs.map((j) => {
+                    {visibleJobs.map((j) => {
                       const isEditing = editingJobId === j.jobId;
                       return (
                         <tr key={j.jobId} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
@@ -728,11 +823,11 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
           </div>
 
           {/* Job progress chart */}
-          {jobs.length > 0 && (
+          {visibleJobs.length > 0 && (
             <div className="card card-blue">
               <h3>Job Progress</h3>
               <div className="card-scroll-sm" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {jobs.map((j, i) => (
+                {visibleJobs.map((j, i) => (
                   <div key={j.jobId}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, marginBottom: 2 }}>
                       <span>Job {j.jobId} — {j.product}</span>
@@ -767,16 +862,12 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
                   onChange={(e) => setTextFilter(e.target.value)}
                   style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--input-border)', backgroundColor: 'var(--input-bg)', color: 'var(--input-text)', maxWidth: 160 }}
                 />
-                <select
-                  value={typeFilter}
-                  onChange={(e) => setTypeFilter(e.target.value)}
-                  style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--input-border)', color: 'var(--input-text)', backgroundColor: 'var(--input-bg)' }}
-                >
-                  <option value="All">All Types</option>
-                  {downtimeTypes.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
+                <CheckboxDropdown
+                  label="Type"
+                  options={downtimeTypes.map((t) => ({ value: t, label: t }))}
+                  selected={typeFilters}
+                  onChange={setTypeFilters}
+                />
                 <button
                   type="button"
                   className="tab-btn tab-btn-blue"
@@ -901,7 +992,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
                   downloadCsv(
                     `analytics_hourly_${loadedRange?.start}_to_${loadedRange?.end}.csv`,
                     ['Date', 'Hour', 'In', 'Out', 'Rated'],
-                    data.hourly.map((h) => [h.startText ? h.startText.slice(0, 10) : '', h.hour, h.in, h.out, h.rated]),
+                    visibleHourly.map((h) => [h.startText ? h.startText.slice(0, 10) : '', h.hour, h.in, h.out, hourJobRates[h.start] ?? h.rated]),
                   );
                   setMsg('Hourly CSV exported');
                 }}
@@ -909,14 +1000,14 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
                 <FileDown size={12} /> CSV
               </button>
             </h3>
-            {data.hourly.length === 0 ? (
+            {visibleHourly.length === 0 ? (
               <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500, padding: 8 }}>
                 No hourly data available for this range.
               </div>
             ) : (
               <>
                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 120, overflowX: 'auto', paddingBottom: 4 }}>
-                  {data.hourly.map((h, i) => (
+                  {visibleHourly.map((h, i) => (
                     <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%', minWidth: 34, flexShrink: 0 }}>
                       <div
                         title={`${hourLabels[i] ?? h.hour}: ${h.out.toLocaleString()}`}
@@ -943,16 +1034,17 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
                       </tr>
                     </thead>
                     <tbody>
-                      {data.hourly.map((h, i) => {
-                        const eff = h.rated > 0 ? ((h.out / h.rated) * 100).toFixed(1) : '0.0';
+                      {visibleHourly.map((h, i) => {
+                        const rated = hourJobRates[h.start] ?? h.rated;
+                        const eff = rated > 0 ? ((h.in / rated) * 100).toFixed(2) : '0.00';
                         return (
                           <tr key={i} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
                             <td className="px-4 py-3 text-slate-600">{h.startText ? h.startText.slice(0, 10) : '-'}</td>
                             <td className="px-4 py-3 text-slate-700">{h.hour}</td>
                             <td className="px-4 py-3 text-slate-600">{h.in.toLocaleString()}</td>
                             <td className="px-4 py-3 text-slate-700">{h.out.toLocaleString()}</td>
-                            <td className="px-4 py-3 text-slate-600">{h.rated.toLocaleString()}</td>
-                            <td className="px-4 py-3" style={{ color: h.rated > 0 && (h.out / h.rated) >= 0.7 ? 'var(--success-text)' : 'var(--danger-text)', fontWeight: 700 }}>{eff}%</td>
+                            <td className="px-4 py-3 text-slate-600">{rated.toLocaleString()}</td>
+                            <td className="px-4 py-3" style={{ color: rated > 0 && (h.in / rated) >= 0.7 ? 'var(--success-text)' : 'var(--danger-text)', fontWeight: 700 }}>{eff}%</td>
                           </tr>
                         );
                       })}

@@ -604,6 +604,12 @@ html {
   align-items: center;
 }
 .card-value { font-weight: bold; font-size: 14px; }
+.card-row.stat-row {
+  justify-content: flex-start;
+  align-items: baseline;
+  gap: 6px;
+}
+.card-row.stat-row .card-value { font-size: 14px; }
 .card-date-input {
   border: none;
   background: transparent;

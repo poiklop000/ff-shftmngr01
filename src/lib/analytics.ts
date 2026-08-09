@@ -59,6 +59,32 @@ export async function fetchJobsInRange(
 }
 
 /**
+ * Fetches the most recent `rated_speed` captured for each of the given jobs,
+ * regardless of the selected date range. Used so the Analytics jobs table
+ * shows each job's current rated speed (not the value from an old capture in
+ * the range). A user correction in `job_overrides` still takes precedence.
+ */
+export async function fetchLatestJobRates(jobIds: number[]): Promise<Record<number, number>> {
+  if (jobIds.length === 0) return {};
+  const { data, error } = await withTimeout(
+    supabase
+      .from('job_snapshots')
+      .select('job_id, rated_speed, capture_time')
+      .in('job_id', jobIds)
+      .order('capture_time', { ascending: false })
+      .limit(1000),
+    DB_TIMEOUT_MS,
+  );
+  if (error) throw new Error(error.message);
+  const latest: Record<number, number> = {};
+  for (const row of (data as { job_id: number | null; rated_speed: number | null }[]) ?? []) {
+    if (row.job_id == null || row.rated_speed == null) continue;
+    if (!(row.job_id in latest)) latest[row.job_id] = row.rated_speed;
+  }
+  return latest;
+}
+
+/**
  * Fetches saved monitoring records whose record_date falls within the given
  * range (inclusive). Dates are YYYY-MM-DD.
  */

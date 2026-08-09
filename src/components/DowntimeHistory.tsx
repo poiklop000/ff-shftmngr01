@@ -21,6 +21,7 @@ import {
 import { filterByShiftWindow, getActiveHours, SHIFT_LABELS, type Shift } from '@/types';
 import { PageHelp } from '@/components/PageHelp';
 import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
+import { CheckboxDropdown } from '@/components/CheckboxDropdown';
 
 function todayStr(): string {
   const now = new Date();
@@ -63,6 +64,8 @@ export function DowntimeHistory({
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const [textFilter, setTextFilter] = useState('');
+  const [typeFilters, setTypeFilters] = useState<string[]>([]);
 
   const activeDate = globalDate || todayStr();
 
@@ -98,8 +101,29 @@ export function DowntimeHistory({
     [events, currentShift, customHours, activeDate],
   );
 
-  const totalDowntimeMs = shiftEvents.reduce((sum, e) => sum + (e.duration_ms ?? 0), 0);
-  const resolvedCount = shiftEvents.filter((e) => e.resolved).length;
+  const downtimeTypes = useMemo(
+    () => Array.from(new Set(shiftEvents.map((e) => e.downtime_type).filter(Boolean))) as string[],
+    [shiftEvents],
+  );
+
+  const filteredEvents = useMemo(() => {
+    let list = shiftEvents;
+    if (typeFilters.length > 0) {
+      list = list.filter((e) => typeFilters.includes(e.downtime_type ?? ''));
+    }
+    if (textFilter.trim()) {
+      const q = textFilter.trim().toLowerCase();
+      list = list.filter((e) =>
+        (e.reason ?? '').toLowerCase().includes(q) ||
+        (e.category ?? '').toLowerCase().includes(q) ||
+        (e.state ?? '').toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [shiftEvents, typeFilters, textFilter]);
+
+  const totalDowntimeMs = filteredEvents.reduce((sum, e) => sum + (e.duration_ms ?? 0), 0);
+  const resolvedCount = filteredEvents.filter((e) => e.resolved).length;
 
   const dateLabel = activeDate === todayStr() ? "Today's" : activeDate;
 
@@ -115,13 +139,14 @@ export function DowntimeHistory({
               "Pick a date with the date picker at the top of the page. Events load automatically for the current date.",
               "Click Search to reload the downtime events for that date and the currently selected shift.",
               "Click Refresh from OFS to pull the latest events again.",
+              "Use the type dropdown to narrow to unplanned, planned, setup, or running-slow events, and the search box to find reasons, categories, or states containing your text.",
             ],
           },
           {
             title: "Reading the summary cards",
             items: [
-              "Total Downtime shows the combined time lost across all events for the selected shift.",
-              "Resolved Events shows how many downtime events have ended vs. still ongoing.",
+              "Total Downtime shows the combined time lost across the currently filtered events for the selected shift.",
+              "Resolved Events shows how many filtered downtime events have ended vs. still ongoing.",
             ],
           },
           {
@@ -153,6 +178,19 @@ export function DowntimeHistory({
 
       <div className="card rounded-lg p-4 mb-4 border border-slate-200 bg-white">
         <div className="flex items-center gap-3 flex-wrap">
+          <input
+            type="search"
+            placeholder="Search reason, category…"
+            value={textFilter}
+            onChange={(e) => setTextFilter(e.target.value)}
+            className="px-3 py-2 rounded-md text-[13px] border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 w-full sm:w-64"
+          />
+          <CheckboxDropdown
+            label="Type"
+            options={downtimeTypes.map((t) => ({ value: t, label: t }))}
+            selected={typeFilters}
+            onChange={setTypeFilters}
+          />
           <button
             type="button"
             className="flex items-center gap-1.5 px-4 py-2 rounded-md text-[13px] font-bold text-white bg-brand-700 hover:bg-brand-800 transition-colors"
@@ -212,6 +250,16 @@ export function DowntimeHistory({
               Click "Refresh from OFS" to pull the latest events
             </p>
           </div>
+        ) : filteredEvents.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+            <Search size={32} className="mb-2 opacity-50" />
+            <p className="text-[13px] font-medium m-0">
+              No events match the current filters
+            </p>
+            <p className="text-[11px] m-0 mt-1 text-slate-400">
+              Try clearing the search text or choosing All Types
+            </p>
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-[13px]">
@@ -227,7 +275,7 @@ export function DowntimeHistory({
                 </tr>
               </thead>
               <tbody>
-                {shiftEvents.map((evt) => {
+                {filteredEvents.map((evt) => {
                   const hasComments = evt.comments && evt.comments.length > 0;
                   const isExpanded = expandedRow === evt.id;
                   return (

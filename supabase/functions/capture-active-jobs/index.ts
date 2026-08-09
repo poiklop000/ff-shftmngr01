@@ -173,7 +173,11 @@ function buildSnapshot(status: OfsLiveStatus): JobSnapshotRow {
   const runstate = status.runstate;
   const captureTime = new Date().toISOString();
 
-  const out = job?.counts?.out ?? 0;
+  // "Produced" = filler output: units through the line / units in to the
+  // process, matching the Live page. `counts.out` is the date-coder counter,
+  // which can freeze when a downstream machine stops while the filler keeps
+  // producing.
+  const out = job?.counts?.through || status.process?.unitsin?.value || job?.counts?.out || 0;
   const qty = job?.quantity ?? 0;
   const ratedSpeed = job?.metadata?.ratedSpeed
     ? parseInt(job.metadata.ratedSpeed, 10)

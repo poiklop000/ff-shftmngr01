@@ -4,11 +4,14 @@
 // contains every downtime event (resolved and ongoing) with rich metadata:
 // crew, job, shift, user, comments, reason category, etc.
 //
-// ALSO fetches `/server/live/spans` to capture setup/changeover spans, which
-// are NOT included in the express/spans endpoint. Setup spans are identified
-// by a state containing "setup". Active setup spans are upserted as ongoing
-// events; when a setup span disappears from the live feed, the corresponding
-// DB row is marked resolved.
+// ALSO fetches `/server/live/spans` to capture setup/changeover and
+// running-slow spans, which are NOT included in the express/spans endpoint.
+// Setup spans are identified by a state containing "setup", running-slow by a
+// state containing "slow". Active spans are upserted as ongoing events; when a
+// span disappears from the live feed, the corresponding DB row is marked
+// resolved. Running-slow is short-lived (typically 3-5 min), so this 5-minute
+// sync is a fallback — the per-minute capture-downtime function is the primary
+// source for running-slow events.
 //
 // On each run it upserts all spans into downtime_events. Existing rows are
 // updated with the latest data (e.g. resolved end times, newly added
@@ -261,46 +264,91 @@ async function fetchLiveSpans(): Promise<OfsSpansData | null> {
   return (await res.json()) as OfsSpansData;
 }
 
-// Extract only setup spans from live/spans. OFS keeps every span in the items
-// array with an ever-growing duration, even after the line has moved on. The
-// line can only be in one non-production state at a time, so only the span(s)
-// with the latest start time are truly active.
-function extractSetupSpans(spans: OfsSpansData | null): OfsLiveSpanItem[] {
+// Extract active setup and running-slow spans from live/spans. OFS keeps every
+// span in the items array with an ever-growing duration, even after the line
+// has moved on. The line can only be in one non-production state at a time, so
+// only the span(s) with the latest start time are truly active.
+function extractLiveSpans(spans: OfsSpansData | null): OfsLiveSpanItem[] {
   if (!spans) return [];
   const items = spans.items ?? [];
-  const setupSpans = items.filter(
-    (s) => s.id && s.start && (s.state?.includes("setup") ?? false),
+  const liveSpans = items.filter(
+    (s) => s.id && s.start && ((s.state?.includes("setup") ?? false) || (s.state?.includes("slow") ?? false)),
   );
-  if (setupSpans.length === 0) return [];
+  if (liveSpans.length === 0) return [];
 
-  // Dedupe by start time (OFS emits overlapping spans for the same event)
-  const byStart = new Map<number, OfsLiveSpanItem>();
-  for (const s of setupSpans) {
-    const existing = byStart.get(s.start!);
+  // Dedupe by start + type (OFS emits overlapping spans for the same event;
+  // a setup and a slow span share a start only by coincidence)
+  const byStart = new Map<string, OfsLiveSpanItem>();
+  for (const s of liveSpans) {
+    const isSlow = s.state?.includes("slow") ?? false;
+    const type = isSlow ? "RUNNING_SLOW" : "SETUP";
+    const key = `${s.start}_${type}`;
+    const existing = byStart.get(key);
     if (!existing) {
-      byStart.set(s.start!, s);
+      byStart.set(key, s);
       continue;
     }
     // Prefer the one with a more specific state
     const existingGeneric = existing.state === "shiftStartable" || existing.state === "shiftEndable";
     const thisGeneric = s.state === "shiftStartable" || s.state === "shiftEndable";
-    if (existingGeneric && !thisGeneric) byStart.set(s.start!, s);
+    if (existingGeneric && !thisGeneric) byStart.set(key, s);
   }
 
   const deduped = [...byStart.values()];
-  // Keep only the latest start — earlier setup spans have ended
+  // Keep only the latest start — earlier spans have ended
   const latestStart = Math.max(...deduped.map((s) => s.start!));
   return deduped.filter((s) => s.start === latestStart);
 }
 
-function setupSpanToRecord(span: OfsLiveSpanItem) {
+// Enrich context for spans that carry no $reason / $crew / $user (e.g.
+// running-slow and setup spans): OFS only attaches order/crew/user to the job
+// (J), shift (S) and shift.job (I) spans in the same live feed, so we look up
+// the latest such span that started at or before the event's start.
+function contextAt(allItems: OfsLiveSpanItem[], at: number) {
+  let order: NonNullable<OfsLiveSpanItem["$order"]> | null = null;
+  let orderStart = -1;
+  let crew: NonNullable<OfsLiveSpanItem["$crew"]> | null = null;
+  let crewStart = -1;
+  let user: NonNullable<OfsLiveSpanItem["$user"]> | null = null;
+  for (const s of allItems) {
+    if (!s.start || s.start > at) continue;
+    if ((s.type === "J" || s.type === "I") && s.$order && s.start >= orderStart) {
+      order = s.$order;
+      orderStart = s.start;
+    }
+    if ((s.type === "S" || s.type === "I") && s.start >= crewStart) {
+      if (s.$crew) crew = s.$crew;
+      if (s.$user) user = s.$user;
+      crewStart = s.start;
+    }
+  }
+  return { order, crew, user };
+}
+
+function orderLabel(order: OfsLiveSpanItem["$order"]): string | null {
+  if (!order) return null;
+  return order.$product?.description ?? order.name ?? order.clientId ?? null;
+}
+
+// Average line speed during the event as a % of rated, from the counts.
+function speedPct(counts: Record<string, number> | null | undefined): number | null {
+  if (!counts) return null;
+  const through = counts["through"] ?? counts["through.unadjusted"];
+  const rated = counts["rated"] ?? counts["rated.unadjusted"];
+  if (!through || !rated || rated <= 0) return null;
+  return Math.round((through / rated) * 1000) / 10;
+}
+
+function setupSpanToRecord(span: OfsLiveSpanItem, allItems: OfsLiveSpanItem[]) {
+  const isSlow = span.state?.includes("slow") ?? false;
+  const ctx = contextAt(allItems, span.start!);
+  const downtimeType = isSlow ? "RUNNING_SLOW" : "SETUP";
   const reason = span.$reason?.description ?? null;
   const setupReason = reason ??
-    span.$order?.$product?.description ??
-    span.$order?.name ??
-    "Setup / Changeover";
+    (isSlow ? "Running Slow" : span.$order?.$product?.description ?? span.$order?.name ?? "Setup / Changeover");
   const setupCategory = span.$reason?.$category?.description ??
-    span.$reason?.category?.description ?? "Setup";
+    span.$reason?.category?.description ??
+    (isSlow ? "Running Slow" : "Setup");
 
   return {
     id: span.id!,
@@ -308,7 +356,7 @@ function setupSpanToRecord(span: OfsLiveSpanItem) {
     console_name: CONSOLE_NAME,
     span_id: span.id ?? null,
     state: span.state ?? null,
-    downtime_type: "SETUP" as string,
+    downtime_type: downtimeType,
     reason: setupReason,
     category: setupCategory,
     start_epoch: span.start!,
@@ -321,9 +369,9 @@ function setupSpanToRecord(span: OfsLiveSpanItem) {
     reason_id: null,
     reason_category: null,
     reason_category_name: null,
-    reason_type: "SETUP",
+    reason_type: downtimeType,
     crew_id: null,
-    crew_name: span.$crew?.name ?? null,
+    crew_name: span.$crew?.name ?? ctx.crew?.name ?? null,
     shift_id: null,
     shift_start: null,
     shift_end: null,
@@ -334,14 +382,16 @@ function setupSpanToRecord(span: OfsLiveSpanItem) {
     order_id: null,
     order_quantity: null,
     user_id: null,
-    user_name: span.$user?.name ?? null,
+    user_name: span.$user?.name ?? ctx.user?.name ?? null,
     comments: null,
     counts: span.counts ?? null,
     metadata: {
-      crew: span.$crew?.name ?? null,
-      user: span.$user?.name ?? null,
+      crew: span.$crew?.name ?? ctx.crew?.name ?? null,
+      user: span.$user?.name ?? ctx.user?.name ?? null,
       class: span.class ?? null,
-      order: span.$order?.name ?? null,
+      order: span.$order?.name ?? orderLabel(ctx.order) ?? null,
+      order_client_id: ctx.order?.clientId ?? null,
+      speed_pct: isSlow ? speedPct(span.counts) : null,
     },
     source: "live",
     updated_at: new Date().toISOString(),
@@ -373,23 +423,40 @@ Deno.serve(async (req: Request) => {
     const spans = await fetchSpansHistory();
     console.log(`[sync-spans-history] Fetched ${spans.length} express spans from OFS`);
 
-    // 2. Fetch live/spans for setup events
+    // 2. Fetch live/spans for setup and running-slow events
     const liveSpans = await fetchLiveSpans();
-    const setupSpans = extractSetupSpans(liveSpans);
-    console.log(`[sync-spans-history] Found ${setupSpans.length} active setup span(s)`);
+    const liveStateSpans = extractLiveSpans(liveSpans);
+    console.log(`[sync-spans-history] Found ${liveStateSpans.length} active setup/running-slow span(s)`);
 
-    // 3. Resolve stale setup events — any open SETUP event whose span ID is
-    //    no longer in the live feed has ended.
-    const setupIds = new Set(setupSpans.map((s) => s.id!));
-    const { data: openSetupRows } = await supabase
+    // 3. Resolve stale live events — any open SETUP/RUNNING_SLOW event whose
+    //    span ID is no longer in the live feed has ended. OFS also emits
+    //    overlapping span IDs for the same event (e.g. "job.setup" ->
+    //    "job.setup.running"); those are detected by event identity (start +
+    //    type) and adopted below instead of being resolved and duplicated.
+    const liveIds = new Set(liveStateSpans.map((s) => s.id!));
+    const { data: openLiveRows } = await supabase
       .from("downtime_events")
-      .select("id, start_epoch")
-      .eq("downtime_type", "SETUP")
+      .select("id, start_epoch, downtime_type")
+      .in("downtime_type", ["SETUP", "RUNNING_SLOW"])
       .eq("resolved", false);
-    const openSetup = (openSetupRows ?? []) as Array<{ id: number; start_epoch: number }>;
-    const staleSetup = openSetup.filter((e) => !setupIds.has(e.id));
+    const openLive = (openLiveRows ?? []) as Array<{
+      id: number;
+      start_epoch: number;
+      downtime_type: string | null;
+    }>;
+
+    const adoptedIds = new Set<number>();
+    for (const s of liveStateSpans) {
+      const type = s.state?.includes("slow") ? "RUNNING_SLOW" : "SETUP";
+      const match = openLive.find(
+        (e) => e.id !== s.id && e.start_epoch === s.start && e.downtime_type === type,
+      );
+      if (match) adoptedIds.add(match.id);
+    }
+
+    const staleLive = openLive.filter((e) => !liveIds.has(e.id) && !adoptedIds.has(e.id));
     const now = Date.now();
-    for (const evt of staleSetup) {
+    for (const evt of staleLive) {
       await supabase
         .from("downtime_events")
         .update({
@@ -400,23 +467,46 @@ Deno.serve(async (req: Request) => {
         })
         .eq("id", evt.id);
     }
-    if (staleSetup.length > 0) {
-      console.log(`[sync-spans-history] Resolved ${staleSetup.length} stale setup event(s)`);
+    if (staleLive.length > 0) {
+      console.log(`[sync-spans-history] Resolved ${staleLive.length} stale setup/running-slow event(s)`);
     }
 
     // 4. Convert all spans to records
     const expressRecords = spans.map(expressSpanToRecord);
-    const setupRecords = setupSpans.map(setupSpanToRecord);
-
-    // Merge: upsert all together. Setup IDs won't collide with express span
-    // IDs because setup spans are excluded from the express/spans endpoint.
-    const allRecords = [...expressRecords, ...setupRecords];
+    const liveRecords = liveStateSpans.map((s) => setupSpanToRecord(s, liveSpans?.items ?? []));
 
     let upserted = 0;
     const BATCH_SIZE = 50;
 
-    for (let i = 0; i < allRecords.length; i += BATCH_SIZE) {
-      const batch = allRecords.slice(i, i + BATCH_SIZE);
+    // Upsert live setup/slow records individually, adopting an existing open
+    // row when OFS changed span ID for the same event instead of inserting a
+    // duplicate. Express span IDs never collide with setup/slow IDs.
+    for (const rec of liveRecords) {
+      const match = openLive.find(
+        (e) => e.id !== rec.id && e.start_epoch === rec.start_epoch && e.downtime_type === rec.downtime_type,
+      );
+      if (match) {
+        const patch = { ...rec };
+        delete (patch as { id?: number }).id;
+        const { data, error } = await supabase
+          .from("downtime_events")
+          .update(patch)
+          .eq("id", match.id)
+          .select("id");
+        if (error) throw new Error(error.message);
+        upserted += data?.length ?? 0;
+      } else {
+        const { data, error } = await supabase
+          .from("downtime_events")
+          .upsert(rec, { onConflict: "id" })
+          .select("id");
+        if (error) throw new Error(error.message);
+        upserted += data?.length ?? 0;
+      }
+    }
+
+    for (let i = 0; i < expressRecords.length; i += BATCH_SIZE) {
+      const batch = expressRecords.slice(i, i + BATCH_SIZE);
       const { data, error } = await supabase
         .from("downtime_events")
         .upsert(batch, {
@@ -432,14 +522,14 @@ Deno.serve(async (req: Request) => {
     }
 
     console.log(
-      `[sync-spans-history] ${new Date().toISOString()} synced ${spans.length} express + ${setupSpans.length} setup (${upserted} upserted, ${staleSetup.length} resolved)`,
+      `[sync-spans-history] ${new Date().toISOString()} synced ${spans.length} express + ${liveStateSpans.length} live (${upserted} upserted, ${staleLive.length} resolved)`,
     );
     return json({
       ok: true,
       totalSpans: spans.length,
-      setupSpans: setupSpans.length,
+      liveSpans: liveStateSpans.length,
       upserted,
-      resolvedSetup: staleSetup.length,
+      resolvedLive: staleLive.length,
       timestamp: new Date().toISOString(),
     });
   } catch (err) {

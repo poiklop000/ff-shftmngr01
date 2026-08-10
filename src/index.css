@@ -1441,6 +1441,7 @@ html[data-theme='dark'] .text-yellow-900 { color: #fde68a !important; }
 html[data-theme='dark'] .border-yellow-200 { border-color: #713f12 !important; }
 
 html[data-theme='dark'] .bg-lime-50 { background-color: #1c2b16 !important; }
+html[data-theme='dark'] .bg-lime-200 { background-color: #22351c !important; }
 html[data-theme='dark'] .text-lime-900 { color: #bef264 !important; }
 html[data-theme='dark'] .border-lime-300 { border-color: #3f6212 !important; }
 

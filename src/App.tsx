@@ -44,6 +44,8 @@ import { loadBoardConfig } from '@/lib/boardConfig';
 
 const VIEW_KEY = 'canning_calc_view';
 
+const AUTOSAVE_DEBOUNCE_MS = 2000;
+
 // Deep-clone the data for an immutable update, but keep the customHours array
 // reference stable. Without this, every edit gives customHours a new identity,
 // which re-triggers effects that depend on it (e.g. the jobs and timeline
@@ -81,6 +83,16 @@ export default function App() {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncTick, setSyncTick] = useState(0);
+
+  // Autosave: operators enter hourly data on the Monitoring page, and a
+  // debounced, silent upsert pushes it to the database so the Board and other
+  // viewers pick it up without a manual "Save" click.
+  const [autoSaveStatus, setAutoSaveStatus] = useState<{ kind: 'idle' | 'saving' | 'saved' | 'error'; text: string }>({
+    kind: 'idle',
+    text: '',
+  });
+  const dirtyRef = useRef(false);
+  const autoSaveTimerRef = useRef<number | undefined>(undefined);
 
   const { theme, toggleTheme } = useTheme();
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -306,6 +318,7 @@ export default function App() {
 
   const handleRowChange = useCallback(
     (shift: Shift, index: number, field: keyof ShiftRow, value: string) => {
+      dirtyRef.current = true;
       setData((prev) => {
         const next = cloneData(prev);
         const row = next.db[shift].rows[index] as unknown as Record<string, unknown>;
@@ -318,6 +331,7 @@ export default function App() {
 
   const handleToggle = useCallback(
     (shift: Shift, index: number, field: 'q' | 's') => {
+      dirtyRef.current = true;
       setData((prev) => {
         const next = cloneData(prev);
         const row = next.db[shift].rows[index];
@@ -331,6 +345,7 @@ export default function App() {
 
   const handleMetaChange = useCallback(
     (shift: Shift, field: 'date' | 'sku' | 'notes', value: string) => {
+      if (field !== 'date') dirtyRef.current = true;
       setData((prev) => {
         const next = cloneData(prev);
         if (field === 'date') {
@@ -413,7 +428,7 @@ export default function App() {
     return () => { cancelled = true; };
   }, [data.date, data.shift]);
 
-  const handleSaveRecord = useCallback(async () => {
+  const performSave = useCallback(async () => {
     if (!data.date) {
       throw new Error('Select a date first at the top of the monitoring table.');
     }
@@ -460,6 +475,17 @@ export default function App() {
     setHasSavedRecord(true);
   }, [data.date, data.shift, data.db, data.notes, data.sku, data.customHours, profile?.display_name]);
 
+  const handleSaveRecord = useCallback(async () => {
+    if (hasSavedRecord) {
+      const who = lastSavedBy ? ` (last saved by ${lastSavedBy})` : '';
+      const ok = window.confirm(
+        `WARNING: A saved record already exists for ${SHIFT_LABELS[data.shift]} on ${data.date}${who}.\n\nSaving now will OVERWRITE the existing record. This cannot be undone.\n\nDo you want to continue?`,
+      );
+      if (!ok) return;
+    }
+    await performSave();
+  }, [hasSavedRecord, lastSavedBy, data.shift, data.date, performSave]);
+
   const handleLoadRecord = useCallback(async () => {
     if (!data.date) {
       throw new Error('Select a date first at the top of the monitoring table.');
@@ -478,6 +504,36 @@ export default function App() {
       return next;
     });
   }, [data.date, data.shift]);
+
+  const runAutoSave = useCallback(async () => {
+    try {
+      setAutoSaveStatus({ kind: 'saving', text: 'Autosaving…' });
+      await performSave();
+      dirtyRef.current = false;
+      setAutoSaveStatus({ kind: 'saved', text: 'Autosaved' });
+    } catch (err) {
+      setAutoSaveStatus({ kind: 'error', text: err instanceof Error ? err.message : 'Autosave failed' });
+    }
+  }, [performSave]);
+
+  // Debounced silent upsert: any hourly edit on the Monitoring page arms the
+  // save, and it fires 2s after the last keystroke so rapid typing doesn't
+  // hammer the database. App stays mounted across view switches, so a pending
+  // save still lands even if the operator navigates away.
+  useEffect(() => {
+    if (!dirtyRef.current) return;
+    const hasRows = Object.keys(data.db[data.shift]?.rows ?? {}).length > 0;
+    if (!data.date || !hasRows) return;
+    if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      autoSaveTimerRef.current = undefined;
+      void runAutoSave();
+    }, AUTOSAVE_DEBOUNCE_MS);
+    return () => {
+      if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = undefined;
+    };
+  }, [data, runAutoSave]);
 
   const handleExportReport = useCallback(() => {
     const dateStr = data.date || '';
@@ -841,6 +897,7 @@ function epochToConsoleTime(
             onLoadRecord={handleLoadRecord}
             hasSavedRecord={hasSavedRecord}
             lastSavedBy={lastSavedBy}
+            autoSaveStatus={autoSaveStatus}
           />
         )}
 

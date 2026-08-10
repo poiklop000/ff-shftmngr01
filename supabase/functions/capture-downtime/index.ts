@@ -190,8 +190,48 @@ function extractActiveSpans(spans: OfsSpansData | null): OfsSpanItem[] {
   return deduped.filter((s) => s.start === latestStart);
 }
 
-function spanToEvent(span: OfsSpanItem): Partial<DowntimeEvent> & { id: number } {
+// Enrich context for spans that carry no $reason / $crew / $user (e.g.
+// running-slow and setup spans): OFS only attaches order/crew/user to the job
+// (J), shift (S) and shift.job (I) spans in the same live feed, so we look up
+// the latest such span that started at or before the event's start.
+function contextAt(allItems: OfsSpanItem[], at: number) {
+  let order: NonNullable<OfsSpanItem["$order"]> | null = null;
+  let orderStart = -1;
+  let crew: NonNullable<OfsSpanItem["$crew"]> | null = null;
+  let crewStart = -1;
+  let user: NonNullable<OfsSpanItem["$user"]> | null = null;
+  for (const s of allItems) {
+    if (!s.start || s.start > at) continue;
+    if ((s.type === "J" || s.type === "I") && s.$order && s.start >= orderStart) {
+      order = s.$order;
+      orderStart = s.start;
+    }
+    if ((s.type === "S" || s.type === "I") && s.start >= crewStart) {
+      if (s.$crew) crew = s.$crew;
+      if (s.$user) user = s.$user;
+      crewStart = s.start;
+    }
+  }
+  return { order, crew, user };
+}
+
+function orderLabel(order: OfsSpanItem["$order"]): string | null {
+  if (!order) return null;
+  return order.$product?.description ?? order.name ?? order.clientId ?? null;
+}
+
+// Average line speed during the event as a % of rated, from the counts.
+function speedPct(counts: Record<string, number> | null | undefined): number | null {
+  if (!counts) return null;
+  const through = counts["through"] ?? counts["through.unadjusted"];
+  const rated = counts["rated"] ?? counts["rated.unadjusted"];
+  if (!through || !rated || rated <= 0) return null;
+  return Math.round((through / rated) * 1000) / 10;
+}
+
+function spanToEvent(span: OfsSpanItem, allItems: OfsSpanItem[]): Partial<DowntimeEvent> & { id: number } {
   const isSlow = span.state?.includes("slow") ?? false;
+  const ctx = contextAt(allItems, span.start!);
   const reason = span.$reason?.description ?? (isSlow ? "Running Slow" : null);
   const category =
     span.$reason?.$category?.description ??
@@ -225,10 +265,12 @@ function spanToEvent(span: OfsSpanItem): Partial<DowntimeEvent> & { id: number }
     resolved: false,
     counts: span.counts ?? null,
     metadata: {
-      crew: span.$crew?.name ?? null,
-      user: span.$user?.name ?? null,
+      crew: span.$crew?.name ?? ctx.crew?.name ?? null,
+      user: span.$user?.name ?? ctx.user?.name ?? null,
       class: span.class ?? null,
-      order: span.$order?.name ?? null,
+      order: span.$order?.name ?? orderLabel(ctx.order) ?? null,
+      order_client_id: ctx.order?.clientId ?? null,
+      speed_pct: isSlow ? speedPct(span.counts) : null,
     },
     updated_at: new Date().toISOString(),
   };
@@ -243,8 +285,17 @@ interface CaptureResult {
   events: DowntimeEvent[];
 }
 
+// The OFS downtime_type (or synthesized type for setup/slow spans) for an item.
+function eventTypeOf(span: OfsSpanItem): string | null {
+  if (span.$reason?.downtimeType) return span.$reason.downtimeType;
+  if (span.state?.includes("setup")) return "SETUP";
+  if (span.state?.includes("slow")) return "RUNNING_SLOW";
+  return null;
+}
+
 async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<CaptureResult> {
   const spans = await fetchSpans();
+  const allItems = spans?.items ?? [];
   const current = extractActiveSpans(spans);
   const currentIds = new Set(current.map((s) => s.id));
 
@@ -255,8 +306,25 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
     .eq("resolved", false);
   const openEvents = (openRows ?? []) as unknown as DowntimeEvent[];
 
-  // Resolve any open events that are no longer in the live feed.
-  const stale = openEvents.filter((e) => !currentIds.has(e.id));
+  // OFS represents a single event with several overlapping spans that share a
+  // start time but carry different span IDs over the event's life (e.g.
+  // "job.setup" -> "job.setup.running", "running.slow" ->
+  // "job.work.running.slow"). Deduping only works within a single run, so when
+  // the active span ID changes for the same event we must adopt the existing
+  // row instead of inserting a duplicate. Identity = start epoch + type.
+  const adoptedIds = new Set<number>();
+  for (const span of current) {
+    const type = eventTypeOf(span);
+    if (!type) continue;
+    const identityMatch = openEvents.find(
+      (e) => e.id !== span.id && e.start_epoch === span.start && e.downtime_type === type,
+    );
+    if (identityMatch) adoptedIds.add(identityMatch.id);
+  }
+
+  // Resolve any open events that are no longer in the live feed (and were not
+  // adopted by a span-id drift above).
+  const stale = openEvents.filter((e) => !currentIds.has(e.id) && !adoptedIds.has(e.id));
   const now = Date.now();
   for (const evt of stale) {
     await supabase
@@ -286,30 +354,56 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
   let insertedAny = false;
 
   for (const span of current) {
-    const existing = openEvents.find((e) => e.id === span.id);
+    let existing = openEvents.find((e) => e.id === span.id);
+    let adopting = false;
+    if (!existing) {
+      const type = eventTypeOf(span);
+      if (type) {
+        const identityMatch = openEvents.find(
+          (e) => e.start_epoch === span.start && e.downtime_type === type,
+        );
+        if (identityMatch) {
+          existing = identityMatch;
+          adopting = true;
+        }
+      }
+    }
     const liveDuration = span.duration ?? 0;
 
     if (existing) {
-      const liveEvt = spanToEvent(span);
+      const liveEvt = spanToEvent(span, allItems);
+      const liveMetadata = (liveEvt.metadata ?? {}) as Record<string, unknown>;
+      const mergedMetadata: Record<string, unknown> = {
+        ...(existing.metadata ?? {}),
+        ...liveMetadata,
+      };
       const needsUpdate =
+        adopting ||
         (!existing.category && liveEvt.category) ||
         (!existing.reason && liveEvt.reason) ||
-        (!existing.downtime_type && liveEvt.downtime_type);
+        (!existing.downtime_type && liveEvt.downtime_type) ||
+        JSON.stringify(existing.metadata) !== JSON.stringify(mergedMetadata);
       const merged: DowntimeEvent = {
         ...existing,
+        span_id: span.id ?? null,
+        state: span.state ?? null,
         duration_ms: liveDuration || (existing.duration_ms ?? 0),
         category: existing.category ?? liveEvt.category ?? null,
         reason: existing.reason ?? liveEvt.reason ?? null,
         downtime_type: existing.downtime_type ?? liveEvt.downtime_type ?? null,
+        metadata: mergedMetadata,
       };
       if (needsUpdate) {
         await supabase
           .from("downtime_events")
           .update({
+            span_id: span.id ?? null,
+            state: span.state ?? null,
             category: merged.category,
             reason: merged.reason,
             downtime_type: merged.downtime_type,
             duration_ms: merged.duration_ms,
+            metadata: merged.metadata,
             updated_at: new Date().toISOString(),
           })
           .eq("id", existing.id);
@@ -318,7 +412,7 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
       continue;
     }
 
-    const record = spanToEvent(span);
+    const record = spanToEvent(span, allItems);
     const { data: inserted, error } = await supabase
       .from("downtime_events")
       .upsert(record, { onConflict: "id" })

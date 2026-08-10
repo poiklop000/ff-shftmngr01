@@ -625,7 +625,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
 
       {hasData && !isLoading && (
         <>
-          <div className="card-row" style={{ flexWrap: 'wrap', gap: 10, marginBottom: 4 }}>
+          <div className="card-row" style={{ justifyContent: 'flex-start', flexWrap: 'wrap', gap: 10, marginBottom: 4 }}>
             <button type="button" className="tab-btn tab-btn-blue" onClick={handleExportAll}>
               <FileDown size={14} /> Export All CSV
             </button>
@@ -754,7 +754,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
                               <div style={{ width: 80, height: 8, backgroundColor: 'var(--track-bg)', borderRadius: 999, overflow: 'hidden' }}>
                                 <div style={{ width: `${Math.min(100, Math.max(0, j.progressPct))}%`, height: '100%', backgroundColor: j.progressPct >= 100 ? '#16a34a' : '#1d4ed8' }} />
                               </div>
-                              <span>{j.progressPct.toFixed(0)}%</span>
+                              <span>{j.progressPct.toFixed(1)}%</span>
                             </div>
                           </td>
                           <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
@@ -831,7 +831,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
                   <div key={j.jobId}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, marginBottom: 2 }}>
                       <span>Job {j.jobId} — {j.product}</span>
-                      <span>{j.progressPct.toFixed(0)}%</span>
+                      <span>{j.progressPct.toFixed(1)}%</span>
                     </div>
                     <div style={{ width: '100%', height: 12, backgroundColor: 'var(--track-bg)', borderRadius: 6, overflow: 'hidden' }}>
                       <div

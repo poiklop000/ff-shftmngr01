@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
   Clock,
   Gauge,
-  Loader2,
   Package,
   TrendingUp,
   User as UserIcon,
@@ -19,25 +18,19 @@ import {
   type OfsRunState,
 } from '@/lib/ofs';
 import { loadJobOverride, type JobOverride } from '@/lib/jobOverrides';
-import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
 import { fetchDowntimeForShift, downtimeEventEndText, type DowntimeEvent } from '@/lib/downtime';
-import { fetchHourlyRatedSpeeds } from '@/lib/jobSnapshots';
 import {
-  computeDowntimeLogs,
   filterByShiftWindow,
   getActiveHours,
-  parseNumber,
   SHIFT_LABELS,
   SHIFT_LIST,
   type Shift,
-  type ShiftRow,
 } from '@/types';
 import { DowntimeTimeline } from '@/components/DowntimeTimeline';
-import { ShiftTable } from '@/components/ShiftTable';
+import { ShiftTableCard } from '@/components/ShiftTableCard';
 
 const DEFAULT_LIVE_MS = 3000;
 const DEFAULT_SUMMARY_MS = 30000;
-const TABLE_ROTATE_MS = 20000;
 const VIEW_ROTATE_MS = 20000;
 
 interface BoardViewProps {
@@ -51,23 +44,39 @@ function dateToStr(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-function nextDateStr(date: string): string {
-  const d = new Date(`${date}T00:00:00`);
-  d.setDate(d.getDate() + 1);
-  return dateToStr(d);
+// The previous shift in the factory's rotation (e.g. Night before Morning,
+// 1st before 2nd), used for the "previous shift" production table. Custom has
+// no defined predecessor.
+function previousShift(shift: Shift): Shift | null {
+  switch (shift) {
+    case 'Morning':
+      return 'Night';
+    case 'Night':
+      return 'Morning';
+    case '1st':
+      return '3rd';
+    case '2nd':
+      return '1st';
+    case '3rd':
+      return '2nd';
+    default:
+      return null;
+  }
 }
 
-function timeStrToMinutes(time: string): number {
-  const [h, m] = time.split(':').map(Number);
-  return (h ?? 0) * 60 + (m ?? 0);
-}
-
-// Converts an "HH:MM" time to minutes-of-shift-day, rolling times before the
-// shift start forward by 1440 (e.g. "00:30" during an 18:00 shift becomes
-// minute 1470). Mirrors the private helper in types.ts.
-function shiftTimeToMinutes(time: string, shiftStartMin: number): number {
-  const min = timeStrToMinutes(time);
-  return min < shiftStartMin ? min + 1440 : min;
+// Calendar date of the previous shift's start, derived from the current
+// shift's start time: shifts starting before noon are preceded by an overnight
+// shift that began on the previous calendar day.
+function previousShiftDate(shift: Shift, date: string): string {
+  const hours = getActiveHours(shift, []);
+  const startStr = hours[0]?.split(' - ')[0]?.trim();
+  const startHour = startStr ? parseInt(startStr.split(':')[0] ?? '0', 10) : 0;
+  if (startHour < 12) {
+    const d = new Date(`${date}T00:00:00`);
+    d.setDate(d.getDate() - 1);
+    return dateToStr(d);
+  }
+  return date;
 }
 
 // The board has no global date/shift controls, so it works out its own shift
@@ -99,12 +108,6 @@ function detectShiftContext(status: OfsLiveStatus | null): { shift: Shift; date:
   return { shift, date };
 }
 
-function isOvernightShift(shift: Shift): boolean {
-  const hours = getActiveHours(shift, []);
-  const startStr = hours[0]?.split(' - ')[0]?.trim();
-  return startStr ? parseInt(startStr.split(':')[0], 10) >= 12 : false;
-}
-
 export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
   const [status, setStatus] = useState<OfsLiveStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -113,21 +116,12 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [liveRefreshMs, setLiveRefreshMs] = useState(DEFAULT_LIVE_MS);
   const [summaryRefreshMs, setSummaryRefreshMs] = useState(DEFAULT_SUMMARY_MS);
-  const [summary, setSummary] = useState<HourlySummaryEntry[]>([]);
-  const [ratedSpeeds, setRatedSpeeds] = useState<Record<number, number>>({});
   const [downtimeEvents, setDowntimeEvents] = useState<DowntimeEvent[]>([]);
   const [boardLoading, setBoardLoading] = useState(false);
   const [override, setOverride] = useState<JobOverride | null>(null);
   const [now, setNow] = useState(Date.now());
-  const [page, setPage] = useState(0);
-  const [switchAt, setSwitchAt] = useState(Date.now() + TABLE_ROTATE_MS);
-  const [rowsPerPage, setRowsPerPage] = useState<number | null>(null);
-  const [mainView, setMainView] = useState<'status' | 'table'>('status');
+  const [mainView, setMainView] = useState<'status' | 'table' | 'prevTable'>('status');
   const [viewSwitchAt, setViewSwitchAt] = useState(Date.now() + transitionMs);
-  const tableCardRef = useRef<HTMLDivElement>(null);
-  const tableWrapRef = useRef<HTMLDivElement>(null);
-  const tableFootRef = useRef<HTMLParagraphElement>(null);
-  const rowHeightRef = useRef(0);
 
   // Live clock tick so the State Time counter keeps counting up on screen.
   useEffect(() => {
@@ -172,37 +166,27 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
 
   const { shift, date } = useMemo(() => detectShiftContext(status), [status]);
 
-  // Board data (hourly counts, rated speeds, downtime) reloads whenever the
-  // detected shift window changes (e.g. at a shift boundary) or on the summary
-  // interval, so the table and timeline stay live without any manual controls.
+  // Downtime for the Live Status timeline reloads whenever the detected shift
+  // window changes (e.g. at a shift boundary) or on the summary interval.
   useEffect(() => {
     if (!date) return;
     let cancelled = false;
 
-    const loadBoard = async () => {
+    const loadTimeline = async () => {
       setBoardLoading(true);
       try {
-        const hours = getActiveHours(shift, []);
-        if (hours.length === 0) return;
-        const day = await fetchHourlySummaryByDate(date);
-        if (isOvernightShift(shift)) {
-          day.push(...(await fetchHourlySummaryByDate(nextDateStr(date))));
-        }
-        const rated = await fetchHourlyRatedSpeeds(date, shift, []);
         const events = await fetchDowntimeForShift(shift, [], date);
         if (cancelled) return;
-        setSummary(day);
-        setRatedSpeeds(rated);
         setDowntimeEvents(events);
       } catch {
-        // keep the last known data on the board if a refresh fails
+        // keep the last known events on the board if a refresh fails
       } finally {
         if (!cancelled) setBoardLoading(false);
       }
     };
 
-    loadBoard();
-    const timer = window.setInterval(loadBoard, summaryRefreshMs);
+    loadTimeline();
+    const timer = window.setInterval(loadTimeline, summaryRefreshMs);
     return () => {
       cancelled = true;
       if (timer) window.clearInterval(timer);
@@ -224,90 +208,30 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
     return () => { cancelled = true; };
   }, [jobId]);
 
-  const activeHours = useMemo(() => getActiveHours(shift, []), [shift]);
+  // Previous shift in the factory rotation, so the board can also show the
+  // table from the shift that ran before the current one.
+  const prevShift = useMemo(() => previousShift(shift), [shift]);
+  const prevDate = useMemo(
+    () => (prevShift ? previousShiftDate(shift, date) : ''),
+    [prevShift, shift, date],
+  );
 
-  // Adaptive paging: measure how many table rows fit the card's visible area
-  // and rotate through pages so no row is hidden by scrolling.
-  useEffect(() => {
-    const card = tableCardRef.current;
-    const wrap = tableWrapRef.current;
-    const foot = tableFootRef.current;
-    if (!card || !wrap || !foot) return;
+  const mainViews = useMemo<Array<'status' | 'table' | 'prevTable'>>(
+    () => (prevShift ? ['status', 'table', 'prevTable'] : ['status', 'table']),
+    [prevShift],
+  );
 
-    const measure = () => {
-      const totalRows = activeHours.length;
-      if (totalRows <= 0) return;
-      if (rowHeightRef.current <= 0 && wrap.offsetHeight > 0) {
-        rowHeightRef.current = wrap.offsetHeight / totalRows;
-      }
-      if (rowHeightRef.current <= 0) return;
-      const wrapTop = wrap.getBoundingClientRect().top - card.getBoundingClientRect().top;
-      const available = card.clientHeight - wrapTop - foot.getBoundingClientRect().height - 4;
-      const per = Math.max(1, Math.floor(available / rowHeightRef.current));
-      setRowsPerPage((prev) => (prev === per ? prev : per));
-    };
-
-    const frame = requestAnimationFrame(() => requestAnimationFrame(measure));
-    const ro = new ResizeObserver(measure);
-    ro.observe(card);
-    window.addEventListener('resize', measure);
-    return () => {
-      cancelAnimationFrame(frame);
-      ro.disconnect();
-      window.removeEventListener('resize', measure);
-    };
-  }, [activeHours.length]);
-
-  const pageCount = rowsPerPage
-    ? Math.max(1, Math.ceil(activeHours.length / rowsPerPage))
-    : 1;
-  const shouldPage = pageCount > 1;
-
-  // Auto-rotate through the table pages every TABLE_ROTATE_MS.
-  useEffect(() => {
-    if (!shouldPage) return;
-    const id = window.setInterval(() => {
-      setPage((p) => (p + 1) % pageCount);
-      setSwitchAt(Date.now() + TABLE_ROTATE_MS);
-    }, TABLE_ROTATE_MS);
-    return () => window.clearInterval(id);
-  }, [shouldPage, pageCount]);
-
-  // Start from the first page whenever the shift / page count changes.
-  useEffect(() => {
-    setPage(0);
-  }, [pageCount, activeHours.length]);
-
-  // The page of hourly rows currently shown in the table (all rows when short).
-  const displayHours = useMemo(() => {
-    if (!rowsPerPage) return activeHours;
-    const start = Math.min(page * rowsPerPage, Math.max(0, activeHours.length - rowsPerPage));
-    return activeHours.slice(start, start + rowsPerPage);
-  }, [rowsPerPage, page, activeHours]);
-
-  // "18:00 – 00:00" style label for the visible page.
-  const pageLabel = useMemo(() => {
-    if (displayHours.length === 0) return '';
-    const first = displayHours[0]?.split(' - ')[0]?.trim() ?? '';
-    const last = displayHours[displayHours.length - 1]?.split(' - ')[1]?.trim() ?? '';
-    return first ? `${first} – ${last}` : '';
-  }, [displayHours]);
-
-  const nextInSeconds = Math.max(0, Math.ceil((switchAt - now) / 1000));
-
-  const switchPage = useCallback((p: number) => {
-    setPage(p);
-    setSwitchAt(Date.now() + TABLE_ROTATE_MS);
-  }, []);
-
-  // Auto-rotate between the Live Status and Production table views.
+  // Auto-rotate through the Live Status, current-shift and previous-shift views.
   useEffect(() => {
     const id = window.setInterval(() => {
-      setMainView((v) => (v === 'status' ? 'table' : 'status'));
+      setMainView((v) => {
+        const idx = mainViews.indexOf(v);
+        return mainViews[(idx + 1) % mainViews.length] ?? 'status';
+      });
       setViewSwitchAt(Date.now() + transitionMs);
     }, transitionMs);
     return () => window.clearInterval(id);
-  }, [transitionMs]);
+  }, [transitionMs, mainViews]);
 
   // Restart the countdown when the configured transition time changes.
   useEffect(() => {
@@ -316,112 +240,10 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
 
   const viewNextInSeconds = Math.max(0, Math.ceil((viewSwitchAt - now) / 1000));
 
-  const switchMainView = useCallback((view: 'status' | 'table') => {
+  const switchMainView = useCallback((view: 'status' | 'table' | 'prevTable') => {
     setMainView(view);
     setViewSwitchAt(Date.now() + transitionMs);
   }, [transitionMs]);
-
-  const intervals = useMemo(() => {
-    const startStr = activeHours[0]?.split(' - ')[0]?.trim();
-    const shiftStartMin = startStr ? timeStrToMinutes(startStr) : 0;
-    return activeHours.map((iv) => {
-      const [s, e] = iv.split(' - ').map((x) => x.trim());
-      return {
-        startMin: shiftTimeToMinutes(s, shiftStartMin),
-        endMin: shiftTimeToMinutes(e || s, shiftStartMin),
-      };
-    });
-  }, [activeHours]);
-
-  // Each OFS hourly entry is the throughput for the hour starting at its
-  // timestamp, so map it to the interval whose start it matches.
-  const outputBuckets = useMemo(() => {
-    const buckets: number[] = new Array(activeHours.length).fill(0);
-    const startStr = activeHours[0]?.split(' - ')[0]?.trim();
-    const shiftStartMin = startStr ? timeStrToMinutes(startStr) : 0;
-    for (const e of summary) {
-      const hhmm = e.hour || e.startText?.slice(11, 16) || '';
-      if (!hhmm) continue;
-      const min = shiftTimeToMinutes(hhmm, shiftStartMin);
-      const idx = intervals.findIndex((iv) => min >= iv.startMin && min < iv.endMin);
-      if (idx >= 0) buckets[idx] += e.in || 0;
-    }
-    return buckets;
-  }, [summary, activeHours, intervals]);
-
-  // Downtime logs per shift interval, mirroring the Monitoring page's
-  // "Import Downtime" behaviour so the board's table auto-fills the same way.
-  const downtimeLogs = useMemo(() => {
-    if (!date || activeHours.length === 0) return {};
-    return computeDowntimeLogs(
-      downtimeEvents.map((e) => ({
-        startText: e.start_text,
-        endText: epochToConsoleTime(e.end_epoch, e.start_epoch, e.start_text),
-        category: e.category,
-        reason: e.reason,
-        comments: e.comments,
-      })),
-      activeHours,
-      date,
-    );
-  }, [downtimeEvents, activeHours, date]);
-
-  // Rows for the Monitoring ShiftTable, auto-filled from the live OFS data
-  // (rated speed, output and downtime logs). Quality, Safety, Yield and Scrap
-  // start empty, and the board is display-only (handlers are no-ops).
-  const tableRows = useMemo<Record<number, ShiftRow>>(() => {
-    const result: Record<number, ShiftRow> = {};
-    for (let i = 0; i < activeHours.length; i++) {
-      const rated = ratedSpeeds[i] ?? 0;
-      const out = outputBuckets[i] ?? 0;
-      result[i] = {
-        spd: rated > 0 ? rated.toLocaleString() : '',
-        out: out > 0 ? out.toLocaleString() : '',
-        log: downtimeLogs[i] ?? '',
-        yld: '',
-        scr: '',
-        q: 0,
-        s: 0,
-      };
-    }
-    return result;
-  }, [activeHours, ratedSpeeds, outputBuckets, downtimeLogs]);
-
-  const noopRowChange = useCallback(() => {}, []);
-  const noopToggle = useCallback(() => {}, []);
-
-  // Rows for the visible page, remapped back to 0-based keys for the table.
-  const displayRows = useMemo<Record<number, ShiftRow>>(() => {
-    if (!rowsPerPage) return tableRows;
-    const start = Math.min(page * rowsPerPage, Math.max(0, activeHours.length - rowsPerPage));
-    const result: Record<number, ShiftRow> = {};
-    for (let j = 0; j < displayHours.length; j++) {
-      const orig = start + j;
-      if (tableRows[orig]) result[j] = tableRows[orig]!;
-    }
-    return result;
-  }, [rowsPerPage, page, activeHours.length, tableRows, displayHours]);
-
-  const totals = useMemo(() => {
-    let out = 0;
-    let oeeSum = 0;
-    let oeeCount = 0;
-    for (let i = 0; i < activeHours.length; i++) {
-      const r = tableRows[i];
-      if (!r) continue;
-      const rowOut = parseNumber(r.out);
-      const rowSpd = parseNumber(r.spd);
-      out += rowOut;
-      if (rowOut > 0 && rowSpd > 0) {
-        oeeSum += (rowOut / rowSpd) * 100;
-        oeeCount += 1;
-      }
-    }
-    return {
-      out,
-      avgOee: oeeCount > 0 ? (oeeSum / oeeCount).toFixed(2) : '0.00',
-    };
-  }, [tableRows, activeHours]);
 
   const consoleTime = status?.workcentre?.consoletimeText || status?.timestampText || '-';
   const timezone = status?.workcentre?.consoletimezone || '';
@@ -484,9 +306,9 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
 
   return (
     <div className="flex flex-col gap-3 h-full min-h-0">
-      {/* ---- View switcher: Live Status ⇄ Production table ---- */}
+      {/* ---- View switcher: Live Status ⇄ Production ⇄ Previous shift ---- */}
       <div className="flex items-center justify-between gap-2 shrink-0">
-        <div className="flex items-center gap-1.5" role="tablist" aria-label="Board view">
+        <div className="flex items-center gap-1.5 flex-wrap" role="tablist" aria-label="Board view">
           <button
             type="button"
             role="tab"
@@ -517,6 +339,23 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
             <TrendingUp size={13} />
             Production
           </button>
+          {prevShift && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mainView === 'prevTable'}
+              onClick={() => switchMainView('prevTable')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-bold uppercase tracking-wide border transition-colors ${
+                mainView === 'prevTable'
+                  ? 'bg-blue-900 text-white border-blue-900'
+                  : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
+              }`}
+              title={`Show the previous shift (${SHIFT_LABELS[prevShift]}) production table`}
+            >
+              <TrendingUp size={13} />
+              Prev · {SHIFT_LABELS[prevShift]}
+            </button>
+          )}
         </div>
         <span className="text-[11px] font-semibold text-slate-500 tabular-nums">
           next in {viewNextInSeconds}s
@@ -676,78 +515,25 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
           </div>
         </div>
 
-        {/* ---- Monitoring table view ---- */}
+        {/* ---- Current shift table view ---- */}
         <div
           className={`absolute inset-0 transition-opacity duration-700 ${
             mainView === 'table' ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none'
           }`}
         >
+          <ShiftTableCard shift={shift} date={date} summaryRefreshMs={summaryRefreshMs} />
+        </div>
+
+        {/* ---- Previous shift table view ---- */}
+        {prevShift && (
           <div
-            ref={tableCardRef}
-            className="card rounded-lg p-3 border border-slate-300 bg-slate-50 h-full flex flex-col"
+            className={`absolute inset-0 transition-opacity duration-700 ${
+              mainView === 'prevTable' ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none'
+            }`}
           >
-        <div className="flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-slate-300 flex-wrap shrink-0">
-          <div className="flex items-center gap-2">
-            <TrendingUp size={15} className="text-slate-700" />
-            <h3 className="m-0 text-[13px] font-bold uppercase tracking-wide text-slate-800">
-              Production — {SHIFT_LABELS[shift]} · {pageLabel || date || '—'}
-            </h3>
+            <ShiftTableCard shift={prevShift} date={prevDate} summaryRefreshMs={summaryRefreshMs} previous />
           </div>
-
-          {shouldPage && (
-            <div className="flex items-center gap-1.5 shrink-0" role="tablist" aria-label="Table pages">
-              {Array.from({ length: pageCount }).map((_, i) => {
-                const active = page === i;
-                const start = Math.min(i * rowsPerPage!, Math.max(0, activeHours.length - rowsPerPage!));
-                const label = activeHours[start]?.split(' - ')[0]?.trim();
-                return (
-                  <button
-                    key={i}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    onClick={() => switchPage(i)}
-                    className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border transition-colors ${
-                      active
-                        ? 'bg-blue-900 text-white border-blue-900'
-                        : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
-                    }`}
-                    title={`Show page ${i + 1} of ${pageCount}`}
-                  >
-                    {i + 1} · {label ?? '—'}
-                  </button>
-                );
-              })}
-              <span className="text-[11px] font-semibold text-slate-500 tabular-nums ml-1">
-                next in {nextInSeconds}s
-              </span>
-            </div>
-          )}
-
-          <div className="flex items-center gap-3 text-[11px] font-semibold text-slate-600 tabular-nums">
-            <span>Output: {totals.out.toLocaleString()}</span>
-            <span>Avg OEE: {totals.avgOee}%</span>
-            {boardLoading && <Loader2 size={12} className="animate-spin text-slate-400" />}
-          </div>
-        </div>
-
-        <div ref={tableWrapRef} className="min-h-0">
-          <ShiftTable
-            hours={displayHours}
-            rows={displayRows}
-            rowCount={displayHours.length}
-            onRowChange={noopRowChange}
-            onToggle={noopToggle}
-          />
-        </div>
-
-        <p ref={tableFootRef} className="text-[11px] text-slate-500 font-medium mt-2 mb-0 shrink-0">
-          Rated speed, output and downtime logs are pulled live from OFS (Live-page corrections applied).
-          OEE = Output ÷ Rated Speed.
-        </p>
-      </div>
-
-        </div>
+        )}
       </div>
     </div>
   );
@@ -824,27 +610,4 @@ function formatElapsedMs(ms: number): string {
 
 function pad(n: number): string {
   return n.toString().padStart(2, '0');
-}
-
-/**
- * Converts an end_epoch (Unix ms) to an OFS console-time string
- * ("YYYY-MM-DD HH:MM:SS") in the factory's timezone. The factory timezone
- * offset is derived from the event's own start_epoch/start_text pair, so no
- * hardcoded timezone is needed. Returns null if endEpoch is null (ongoing).
- */
-function epochToConsoleTime(
-  endEpoch: number | null,
-  startEpoch: number,
-  startText: string | null,
-): string | null {
-  if (endEpoch === null || !startText) return null;
-  const offsetMs = startEpoch - Date.parse(startText.replace(' ', 'T'));
-  const shifted = new Date(endEpoch - offsetMs);
-  const y = shifted.getFullYear();
-  const m = String(shifted.getMonth() + 1).padStart(2, '0');
-  const d = String(shifted.getDate()).padStart(2, '0');
-  const h = String(shifted.getHours()).padStart(2, '0');
-  const min = String(shifted.getMinutes()).padStart(2, '0');
-  const s = String(shifted.getSeconds()).padStart(2, '0');
-  return `${y}-${m}-${d} ${h}:${min}:${s}`;
 }

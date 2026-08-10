@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Loader2, Save, FolderOpen, CheckCircle2, Package, FileDown, Printer, Plus, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Download, Loader2, Save, FolderOpen, CheckCircle2, Package, FileDown, Printer, Plus, RefreshCw } from 'lucide-react';
 import {
   filterByShiftWindow,
   getActiveHours,
@@ -46,7 +46,6 @@ interface MonitoringViewProps {
   onLoadRecord: () => Promise<void>;
   hasSavedRecord: boolean;
   lastSavedBy: string;
-  autoSaveStatus: { kind: 'idle' | 'saving' | 'saved' | 'error'; text: string };
 }
 
 export function MonitoringView({
@@ -67,7 +66,6 @@ export function MonitoringView({
   onLoadRecord,
   hasSavedRecord,
   lastSavedBy,
-  autoSaveStatus,
 }: MonitoringViewProps) {
   const [importingCounter, setImportingCounter] = useState(false);
   const [importingDowntime, setImportingDowntime] = useState(false);
@@ -601,28 +599,6 @@ export function MonitoringView({
         {hasSavedRecord && !saving && !loadingRecord && (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: 'var(--success-text)' }}>
             <CheckCircle2 size={12} /> Saved record exists
-          </span>
-        )}
-        {autoSaveStatus.kind !== 'idle' && (
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              fontSize: 11,
-              fontWeight: 600,
-              color: autoSaveStatus.kind === 'error' ? 'var(--danger-text)' : 'var(--success-text)',
-            }}
-            title="Hourly edits are saved automatically to the database a moment after you stop typing"
-          >
-            {autoSaveStatus.kind === 'saving' ? (
-              <Loader2 size={12} className="animate-spin" />
-            ) : autoSaveStatus.kind === 'error' ? (
-              <AlertTriangle size={12} />
-            ) : (
-              <CheckCircle2 size={12} />
-            )}
-            {autoSaveStatus.text}
           </span>
         )}
       </div>

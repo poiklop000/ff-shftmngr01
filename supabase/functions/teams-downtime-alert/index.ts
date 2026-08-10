@@ -15,6 +15,80 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const CONSOLE_URL = "https://poiklop000.github.io/ff-shftmngr01/#/analytics";
 
+// OFS express history is the authoritative source for the reason/category of a
+// downtime span. OFS often labels a span "Unallocated" in the live feed while
+// the specific reason is assigned asynchronously, so before alerting we do a
+// best-effort express lookup to enrich (and verify) the freshest data. Falls
+// back to the DB row untouched if OFS is unreachable.
+const OFS_BASE = "https://free-flow.ofsxpress.com";
+const SERVER_PATH = "/OFS002/server";
+
+function getOfsAuth(): string | null {
+  const user = Deno.env.get("OFS_USER");
+  const pass = Deno.env.get("OFS_PASS");
+  if (!user || !pass) return null;
+  return `Basic ${btoa(`${user}:${pass}`)}`;
+}
+
+interface ExpressLookupResult {
+  reason: string | null;
+  category: string | null;
+  resolved: boolean;
+  end_epoch: number | null;
+  duration_ms: number | null;
+}
+
+// Fetch express history for the window covering the candidate events and index
+// it by span id. Any network/auth failure degrades to an empty map so alerts
+// never block on OFS being down.
+async function fetchExpressLookup(
+  startMs: number,
+  endMs: number,
+): Promise<Map<number, ExpressLookupResult>> {
+  const auth = getOfsAuth();
+  if (!auth) return new Map();
+  try {
+    const res = await fetch(
+      `${OFS_BASE}${SERVER_PATH}/data/express/spans?start=${startMs}&end=${endMs}`,
+      {
+        method: "GET",
+        headers: { Authorization: auth, Accept: "application/json" },
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!res.ok) {
+      console.error(`[teams-downtime-alert] express lookup returned ${res.status}`);
+      return new Map();
+    }
+    const data = (await res.json()) as {
+      spans?: Array<{
+        id: number;
+        reasonDescription?: string | null;
+        reasonCategoryName?: string | null;
+        start: number;
+        end?: number;
+      }>;
+    };
+    const map = new Map<number, ExpressLookupResult>();
+    for (const span of data.spans ?? []) {
+      const end = span.end && span.end > 0 ? span.end : null;
+      map.set(span.id, {
+        reason: span.reasonDescription ?? null,
+        category: span.reasonCategoryName ?? null,
+        resolved: !!end,
+        end_epoch: end,
+        duration_ms: end ? end - span.start : null,
+      });
+    }
+    return map;
+  } catch (err) {
+    console.error(
+      `[teams-downtime-alert] express lookup failed: ${err instanceof Error ? err.message : err}`,
+    );
+    return new Map();
+  }
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -27,6 +101,7 @@ interface DowntimeRow {
   downtime_type: string | null;
   reason: string | null;
   category: string | null;
+  source: string | null;
   start_epoch: number;
   duration_ms: number | null;
   start_text: string | null;
@@ -438,8 +513,8 @@ Deno.serve(async (req: Request) => {
     const escalationMinutes = (() => {
       const levels = (escalationRow?.value ?? "30,60,120")
         .split(",")
-        .map((s) => Number(s.trim()))
-        .filter((n) => Number.isFinite(n) && n > 0);
+        .map((s: string) => Number(s.trim()))
+        .filter((n: number) => Number.isFinite(n) && n > 0);
       return levels.length > 0 ? [...levels].sort((a, b) => a - b) : [30, 60, 120];
     })();
 
@@ -485,7 +560,7 @@ Deno.serve(async (req: Request) => {
     //     AND total duration >= threshold
     const { data: events, error } = await supabase
       .from("downtime_events")
-      .select("id, console_name, downtime_type, reason, category, start_epoch, duration_ms, start_text, crew_name, resolved, end_epoch, alert_sent, resolved_alert_sent, last_escalation_minutes")
+      .select("id, console_name, downtime_type, reason, category, source, start_epoch, duration_ms, start_text, crew_name, resolved, end_epoch, alert_sent, resolved_alert_sent, last_escalation_minutes")
       .or(`and(alert_sent.eq.false,resolved.eq.false),and(alert_sent.eq.true,resolved.eq.false),and(resolved_alert_sent.eq.false,resolved.eq.true,end_epoch.gte.${recentEndCutoffMs})`)
       .order("start_epoch", { ascending: false });
 
@@ -496,6 +571,84 @@ Deno.serve(async (req: Request) => {
       return json({ ok: true, alerted: 0 });
     }
 
+    // The same physical downtime can exist as both a source='live' row (written
+    // by capture-downtime) and a source='history' row (written by
+    // sync-spans-history) with slightly drifted start epochs. Alerting on both
+    // produces duplicate alert chains. Group candidates by downtime type + fuzzy
+    // start (within a minute) and keep the most authoritative row per group:
+    // prefer the express/history row, then the row with a specific reason
+    // (over the generic "Unallocated"), then the earlier one.
+    const grouped = new Map<string, DowntimeRow[]>();
+    for (const evt of events) {
+      const type = (evt.downtime_type ?? "").toUpperCase() || "UNKNOWN";
+      let placed = false;
+      for (const [key, rows] of grouped) {
+        const [kType, kStart] = key.split("|");
+        if (kType === type && Math.abs(Number(kStart) - evt.start_epoch) <= 60_000) {
+          rows.push(evt);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) grouped.set(`${type}|${evt.start_epoch}`, [evt]);
+    }
+
+    const preferredIds = new Set<number>();
+    for (const rows of grouped.values()) {
+      if (rows.length === 1) {
+        preferredIds.add(rows[0]!.id);
+        continue;
+      }
+      rows.sort((a, b) => {
+        const aHistory = a.source === "history";
+        const bHistory = b.source === "history";
+        if (aHistory !== bHistory) return aHistory ? -1 : 1;
+        const aSpecific = a.reason && a.reason !== "Unallocated";
+        const bSpecific = b.reason && b.reason !== "Unallocated";
+        if (aSpecific !== bSpecific) return aSpecific ? -1 : 1;
+        return a.start_epoch - b.start_epoch;
+      });
+      preferredIds.add(rows[0]!.id);
+    }
+    const droppedDuplicateIds = events
+      .map((e) => e.id)
+      .filter((id) => !preferredIds.has(id));
+
+    // Enrich candidate events with the freshest express history so the alert
+    // carries the assigned reason/category and the true resolution state
+    // (fixes "Unallocated" reasons and under-threshold occurred alerts).
+    const earliestStart = Math.min(...events.map((e) => e.start_epoch));
+    const expressLookup = await fetchExpressLookup(
+      earliestStart - 5 * 60_000,
+      nowMs + 60_000,
+    );
+    const enrichedEvents = events.map((evt) => {
+      const fresh = expressLookup.get(evt.id);
+      if (!fresh) return evt;
+      const reason = fresh.reason && fresh.reason !== "Unallocated" ? fresh.reason : evt.reason;
+      const category = fresh.category && fresh.category !== evt.category ? fresh.category : evt.category;
+      if (
+        reason === evt.reason &&
+        category === evt.category &&
+        fresh.resolved === (evt.resolved ?? false) &&
+        fresh.end_epoch === evt.end_epoch
+      ) {
+        return evt;
+      }
+      return {
+        ...evt,
+        reason,
+        category,
+        resolved: evt.resolved ?? fresh.resolved,
+        end_epoch: fresh.end_epoch ?? evt.end_epoch,
+        duration_ms: fresh.duration_ms ?? evt.duration_ms,
+      };
+    });
+    const enrichedById = new Map(enrichedEvents.map((e) => [e.id, e]));
+    const enrichedCount = enrichedEvents.filter(
+      (e, i) => JSON.stringify(e) !== JSON.stringify(events[i]),
+    ).length;
+
     let occurredCount = 0;
     let resolvedCount = 0;
     let escalationCount = 0;
@@ -503,40 +656,46 @@ Deno.serve(async (req: Request) => {
     const failed: number[] = [];
 
     for (const evt of events) {
-      const needsOccurred = !evt.alert_sent && !evt.resolved;
-      const needsResolved = !evt.resolved_alert_sent && evt.resolved;
+      if (!preferredIds.has(evt.id)) {
+        skippedCount++;
+        continue;
+      }
+      const enriched = enrichedById.get(evt.id) ?? evt;
+      const needsOccurred = !evt.alert_sent && !enriched.resolved;
+      const needsResolved = !evt.resolved_alert_sent && enriched.resolved;
       // An event that already fired its initial alert is still a candidate for
       // escalation while it remains unresolved — it must not be skipped here.
-      const needsEscalation = !evt.resolved && evt.alert_sent;
+      const needsEscalation = !enriched.resolved && evt.alert_sent;
 
       if (!needsOccurred && !needsResolved && !needsEscalation) {
         skippedCount++;
         continue;
       }
 
-      // Duration check
-      const effectiveDurationMs = evt.resolved
-        ? (evt.duration_ms ?? (evt.end_epoch ? evt.end_epoch - evt.start_epoch : 0))
-        : (nowMs - evt.start_epoch);
+      // Duration check — use the true duration once the event has resolved,
+      // otherwise elapsed time since start.
+      const effectiveDurationMs = enriched.resolved
+        ? (enriched.duration_ms ?? (enriched.end_epoch ? enriched.end_epoch - enriched.start_epoch : 0))
+        : (nowMs - enriched.start_epoch);
 
       // Job context (product for the alert) 
-      const ctx = await findJobContext(supabase, evt.start_epoch);
-      const product = ctx?.product ?? ctx?.orderName;
+      const ctx = await findJobContext(supabase, enriched.start_epoch);
+      const product = ctx?.product ?? ctx?.orderName ?? null;
 
       if (needsOccurred) {
         if (effectiveDurationMs < thresholdMs) {
           skippedCount++;
           continue;
         }
-        const payload = buildOccurredMessage(evt, ctx);
+        const payload = buildOccurredMessage(enriched, ctx);
         const res = await sendTeams(webhookUrl, payload);
         await logAlert(supabase, {
           alertType: "occurred",
-          eventId: evt.id,
-          reason: evt.reason,
-          category: evt.category,
+          eventId: enriched.id,
+          reason: enriched.reason,
+          category: enriched.category,
           product,
-          message: `Downtime Started — ${evt.console_name ?? "Production Line"}`,
+          message: `Downtime Started — ${enriched.console_name ?? "Production Line"}`,
           status: res.ok ? "sent" : "failed",
           httpStatus: res.httpStatus,
         });
@@ -564,15 +723,15 @@ Deno.serve(async (req: Request) => {
           skippedCount++;
           continue;
         }
-        const payload = buildResolvedMessage(evt, ctx);
+        const payload = buildResolvedMessage(enriched, ctx);
         const res = await sendTeams(webhookUrl, payload);
         await logAlert(supabase, {
           alertType: "resolved",
-          eventId: evt.id,
-          reason: evt.reason,
-          category: evt.category,
+          eventId: enriched.id,
+          reason: enriched.reason,
+          category: enriched.category,
           product,
-          message: `Downtime Resolved — ${evt.console_name ?? "Production Line"}`,
+          message: `Downtime Resolved — ${enriched.console_name ?? "Production Line"}`,
           status: res.ok ? "sent" : "failed",
           httpStatus: res.httpStatus,
         });
@@ -580,18 +739,18 @@ Deno.serve(async (req: Request) => {
           await supabase
             .from("downtime_events")
             .update({ resolved_alert_sent: true, updated_at: new Date().toISOString() })
-            .eq("id", evt.id);
+            .eq("id", enriched.id);
           resolvedCount++;
         } else {
-          failed.push(evt.id);
+          failed.push(enriched.id);
         }
       }
 
       // Escalation: ongoing event that already fired its initial alert and has
       // now crossed the next escalation threshold. Only UNPLANNED downtimes
       // escalate, so routine planned/setup stops never page people.
-      const isUnplanned = (evt.downtime_type ?? "").toUpperCase() === "UNPLANNED";
-      if (!evt.resolved && evt.alert_sent && isUnplanned) {
+      const isUnplanned = (enriched.downtime_type ?? "").toUpperCase() === "UNPLANNED";
+      if (!enriched.resolved && evt.alert_sent && isUnplanned) {
         // Pick the highest threshold the event has now crossed that hasn't been
         // alerted yet, so a long-running downtime jumps straight to the correct
         // level instead of replaying 30/60/120 over consecutive runs.
@@ -600,15 +759,15 @@ Deno.serve(async (req: Request) => {
         );
         if (crossed.length > 0) {
           const m = crossed[crossed.length - 1]!;
-          const payload = buildEscalationMessage(evt, ctx, m);
+          const payload = buildEscalationMessage(enriched, ctx, m);
           const res = await sendTeams(webhookUrl, payload);
           await logAlert(supabase, {
             alertType: "escalation",
-            eventId: evt.id,
-            reason: evt.reason,
-            category: evt.category,
+            eventId: enriched.id,
+            reason: enriched.reason,
+            category: enriched.category,
             product,
-            message: `Downtime Still Ongoing — ${evt.console_name ?? "Production Line"} (${m} min)`,
+            message: `Downtime Still Ongoing — ${enriched.console_name ?? "Production Line"} (${m} min)`,
             status: res.ok ? "sent" : "failed",
             httpStatus: res.httpStatus,
           });
@@ -616,10 +775,10 @@ Deno.serve(async (req: Request) => {
             await supabase
               .from("downtime_events")
               .update({ last_escalation_minutes: m, updated_at: new Date().toISOString() })
-              .eq("id", evt.id);
+              .eq("id", enriched.id);
             escalationCount++;
           } else {
-            failed.push(evt.id);
+            failed.push(enriched.id);
           }
         }
       }

@@ -268,7 +268,7 @@ function spanToEvent(span: OfsSpanItem, allItems: OfsSpanItem[]): Partial<Downti
       crew: span.$crew?.name ?? ctx.crew?.name ?? null,
       user: span.$user?.name ?? ctx.user?.name ?? null,
       class: span.class ?? null,
-      order: span.$order?.name ?? orderLabel(ctx.order) ?? null,
+      order: span.$order?.name ?? orderLabel(ctx.order ?? undefined) ?? null,
       order_client_id: ctx.order?.clientId ?? null,
       speed_pct: isSlow ? speedPct(span.counts) : null,
     },
@@ -291,6 +291,14 @@ function eventTypeOf(span: OfsSpanItem): string | null {
   if (span.state?.includes("setup")) return "SETUP";
   if (span.state?.includes("slow")) return "RUNNING_SLOW";
   return null;
+}
+
+// OFS can report the same event with slightly different start epochs between
+// the live feed and the express history (a few seconds to a minute of drift).
+// Identity matching treats starts within this tolerance as the same event.
+function startsMatch(a: number | undefined, b: number | undefined): boolean {
+  if (a == null || b == null) return false;
+  return Math.abs(a - b) <= 60_000;
 }
 
 async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<CaptureResult> {
@@ -317,7 +325,7 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
     const type = eventTypeOf(span);
     if (!type) continue;
     const identityMatch = openEvents.find(
-      (e) => e.id !== span.id && e.start_epoch === span.start && e.downtime_type === type,
+      (e) => e.id !== span.id && startsMatch(e.start_epoch, span.start) && e.downtime_type === type,
     );
     if (identityMatch) adoptedIds.add(identityMatch.id);
   }
@@ -360,7 +368,7 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
       const type = eventTypeOf(span);
       if (type) {
         const identityMatch = openEvents.find(
-          (e) => e.start_epoch === span.start && e.downtime_type === type,
+          (e) => startsMatch(e.start_epoch, span.start) && e.downtime_type === type,
         );
         if (identityMatch) {
           existing = identityMatch;

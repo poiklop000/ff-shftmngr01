@@ -186,6 +186,26 @@ function formatEpochConsole(epochMs: number): string {
   return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}:${get("second")}.${ms}`;
 }
 
+// OFS can report the same event with slightly different start epochs between
+// the live feed and the express history (a few seconds to a minute of drift).
+function startsMatch(a: number | undefined, b: number | undefined): boolean {
+  if (a == null || b == null) return false;
+  return Math.abs(a - b) <= 60_000;
+}
+
+// Two downtime windows overlap when each starts before the other ends.
+// Ongoing windows (null end) extend to "now".
+function windowsOverlap(
+  aStart: number,
+  aEnd: number | null,
+  bStart: number,
+  bEnd: number | null,
+): boolean {
+  const aEndAt = aEnd ?? Date.now();
+  const bEndAt = bEnd ?? Date.now();
+  return aStart <= bEndAt && bStart <= aEndAt;
+}
+
 function expressSpanToRecord(span: ExpressSpan) {
   const end = span.end ?? 0;
   const resolved = end > 0;
@@ -389,7 +409,7 @@ function setupSpanToRecord(span: OfsLiveSpanItem, allItems: OfsLiveSpanItem[]) {
       crew: span.$crew?.name ?? ctx.crew?.name ?? null,
       user: span.$user?.name ?? ctx.user?.name ?? null,
       class: span.class ?? null,
-      order: span.$order?.name ?? orderLabel(ctx.order) ?? null,
+      order: span.$order?.name ?? orderLabel(ctx.order ?? undefined) ?? null,
       order_client_id: ctx.order?.clientId ?? null,
       speed_pct: isSlow ? speedPct(span.counts) : null,
     },
@@ -475,6 +495,48 @@ Deno.serve(async (req: Request) => {
     const expressRecords = spans.map(expressSpanToRecord);
     const liveRecords = liveStateSpans.map((s) => setupSpanToRecord(s, liveSpans?.items ?? []));
 
+    // 4b. Prefer the express (history) record over a live capture that
+    //     represents the same event. capture-downtime may have written a
+    //     source='live' row from the snapshot feed with a different span id and
+    //     a slightly drifted start. Match on downtime type + (fuzzy start OR
+    //     overlapping window with the same reason) and remove the live row so
+    //     the express upsert below leaves exactly one authoritative row.
+    const { data: existingLiveRows } = await supabase
+      .from("downtime_events")
+      .select("id, start_epoch, end_epoch, downtime_type, reason, source")
+      .eq("source", "live");
+    const liveRows = (existingLiveRows ?? []) as Array<{
+      id: number;
+      start_epoch: number;
+      end_epoch: number | null;
+      downtime_type: string | null;
+      reason: string | null;
+    }>;
+    let removedLiveDuplicates = 0;
+    for (const rec of expressRecords) {
+      const type = rec.downtime_type;
+      if (!type) continue;
+      const dup = liveRows.find(
+        (l) =>
+          l.id !== rec.id &&
+          l.downtime_type === type &&
+          (startsMatch(l.start_epoch, rec.start_epoch) ||
+            (l.reason && l.reason === rec.reason &&
+              windowsOverlap(l.start_epoch, l.end_epoch, rec.start_epoch, rec.end_epoch ?? null))),
+      );
+      if (dup) {
+        const { error } = await supabase
+          .from("downtime_events")
+          .delete()
+          .eq("id", dup.id);
+        if (error) throw new Error(error.message);
+        removedLiveDuplicates += 1;
+      }
+    }
+    if (removedLiveDuplicates > 0) {
+      console.log(`[sync-spans-history] Removed ${removedLiveDuplicates} live duplicate(s) superseded by express history`);
+    }
+
     let upserted = 0;
     const BATCH_SIZE = 50;
 
@@ -522,13 +584,14 @@ Deno.serve(async (req: Request) => {
     }
 
     console.log(
-      `[sync-spans-history] ${new Date().toISOString()} synced ${spans.length} express + ${liveStateSpans.length} live (${upserted} upserted, ${staleLive.length} resolved)`,
+      `[sync-spans-history] ${new Date().toISOString()} synced ${spans.length} express + ${liveStateSpans.length} live (${upserted} upserted, ${removedLiveDuplicates} live dupes removed, ${staleLive.length} resolved)`,
     );
     return json({
       ok: true,
       totalSpans: spans.length,
       liveSpans: liveStateSpans.length,
       upserted,
+      removedLiveDuplicates,
       resolvedLive: staleLive.length,
       timestamp: new Date().toISOString(),
     });

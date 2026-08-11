@@ -212,9 +212,21 @@ function typeStyle(downtimeType: string | null): TypeStyle {
       return { color: "Accent", label: "Planned Downtime" };
     case "SETUP":
       return { color: "Warning", label: "Setup / Changeover" };
+    case "RUNNING_SLOW":
+      return { color: "Accent", label: "Running Slow" };
     default:
       return { color: "Default", label: downtimeType ?? "Downtime" };
   }
+}
+
+// Running Slow is an informational condition, not a breakdown — OFS tags spans
+// with downtime_type RUNNING_SLOW (reason/category "Running Slow") whenever the
+// line drops below rated speed. Those get a softer "line is slow" card instead
+// of being treated as unplanned downtime.
+function isRunningSlow(evt: { downtime_type: string | null; reason: string | null }): boolean {
+  if ((evt.downtime_type ?? "").toUpperCase() === "RUNNING_SLOW") return true;
+  const reason = (evt.reason ?? "").toUpperCase();
+  return reason === "RUNNING SLOW" || reason === "RUNNING_SLOW";
 }
 
 // OFS leaves a span "Unallocated" until a user classifies it, so a reason of
@@ -301,6 +313,38 @@ function buildOccurredMessage(
     body: [
       { type: "TextBlock", text: `Downtime Started — ${lineName}`, weight: "Bolder", size: "Large", color: "Attention" },
       { type: "TextBlock", text: `${style.label} is ONGOING.`, wrap: true, color: style.color, weight: "Bolder" },
+      { type: "FactSet", facts },
+      { type: "TextBlock", text: "— Sent automatically by Krones Canning Line Console", wrap: true, isSubtle: true, size: "Small" },
+    ],
+    actions: [
+      { type: "Action.OpenUrl", title: "View in Console", url: CONSOLE_URL },
+    ],
+  };
+}
+
+function buildRunningSlowOccurredMessage(
+  evt: DowntimeRow,
+  ctx: JobContext | null,
+): Record<string, unknown> {
+  const nowMs = Date.now();
+  const durationMs = evt.duration_ms ?? (nowMs - evt.start_epoch);
+  const lineName = evt.console_name ?? "Production Line";
+  const startTime = evt.start_text ?? formatEpochLocal(evt.start_epoch);
+
+  const facts: { title: string; value: string }[] = [
+    { title: "Reason:", value: "Running Slow" },
+  ];
+  const product = productFact(ctx);
+  if (product) facts.push(product);
+  facts.push({ title: "Duration so far:", value: formatDuration(durationMs) });
+  facts.push({ title: "Started:", value: startTime });
+
+  return {
+    type: "AdaptiveCard",
+    version: "1.2",
+    body: [
+      { type: "TextBlock", text: `Line Running Slow — ${lineName}`, weight: "Bolder", size: "Large", color: "Warning" },
+      { type: "TextBlock", text: "The line is running slow (informational).", wrap: true, weight: "Bolder" },
       { type: "FactSet", facts },
       { type: "TextBlock", text: "— Sent automatically by Krones Canning Line Console", wrap: true, isSubtle: true, size: "Small" },
     ],
@@ -571,8 +615,14 @@ Deno.serve(async (req: Request) => {
           resolved_alert_sent: false,
           last_escalation_minutes: null,
         };
-        payload = buildOccurredMessage(mockEvt, null);
-        testMessage = `Test Alert (${testReason})`;
+        if (isRunningSlow(mockEvt)) {
+          mockEvt.downtime_type = "RUNNING_SLOW";
+          payload = buildRunningSlowOccurredMessage(mockEvt, null);
+          testMessage = "Test Alert (Running Slow)";
+        } else {
+          payload = buildOccurredMessage(mockEvt, null);
+          testMessage = `Test Alert (${testReason})`;
+        }
       } else {
         payload = buildTestMessage();
       }
@@ -701,6 +751,7 @@ Deno.serve(async (req: Request) => {
         continue;
       }
       const enriched = enrichedById.get(evt.id) ?? evt;
+      const runningSlow = isRunningSlow(enriched);
       const needsOccurred = !evt.alert_sent && !enriched.resolved;
       const needsResolved = !evt.resolved_alert_sent && enriched.resolved;
       // An event that already fired its initial alert is still a candidate for
@@ -727,15 +778,19 @@ Deno.serve(async (req: Request) => {
           skippedCount++;
           continue;
         }
-        const payload = buildOccurredMessage(enriched, ctx);
+        const payload = runningSlow
+          ? buildRunningSlowOccurredMessage(enriched, ctx)
+          : buildOccurredMessage(enriched, ctx);
         const res = await sendTeams(webhookUrl, payload);
         await logAlert(supabase, {
-          alertType: "occurred",
+          alertType: runningSlow ? "running_slow" : "occurred",
           eventId: enriched.id,
           reason: enriched.reason,
           category: enriched.category,
           product,
-          message: `Downtime Started — ${enriched.console_name ?? "Production Line"}`,
+          message: runningSlow
+            ? `Line Running Slow — ${enriched.console_name ?? "Production Line"}`
+            : `Downtime Started — ${enriched.console_name ?? "Production Line"}`,
           status: res.ok ? "sent" : "failed",
           httpStatus: res.httpStatus,
         });
@@ -763,6 +818,15 @@ Deno.serve(async (req: Request) => {
           skippedCount++;
           continue;
         }
+        // Running Slow is informational only — no resolved notification. Mark
+        // the flag so it isn't picked up again on the next run.
+        if (runningSlow) {
+          await supabase
+            .from("downtime_events")
+            .update({ resolved_alert_sent: true, updated_at: new Date().toISOString() })
+            .eq("id", enriched.id);
+          continue;
+        }
         const payload = buildResolvedMessage(enriched, ctx);
         const res = await sendTeams(webhookUrl, payload);
         await logAlert(supabase, {
@@ -788,9 +852,10 @@ Deno.serve(async (req: Request) => {
 
       // Escalation: ongoing event that already fired its initial alert and has
       // now crossed the next escalation threshold. Only UNPLANNED downtimes
-      // escalate, so routine planned/setup stops never page people.
+      // escalate, so routine planned/setup stops and running-slow notices never
+      // page people.
       const isUnplanned = (enriched.downtime_type ?? "").toUpperCase() === "UNPLANNED";
-      if (!enriched.resolved && evt.alert_sent && isUnplanned) {
+      if (!enriched.resolved && evt.alert_sent && isUnplanned && !runningSlow) {
         // Pick the highest threshold the event has now crossed that hasn't been
         // alerted yet, so a long-running downtime jumps straight to the correct
         // level instead of replaying 30/60/120 over consecutive runs.
@@ -834,7 +899,7 @@ Deno.serve(async (req: Request) => {
 
       const { data: recentEvents, error: recentError } = await supabase
         .from("downtime_events")
-        .select("reason, category, console_name")
+        .select("reason, category, console_name, downtime_type")
         .gte("start_epoch", oneHourAgoMs)
         .not("reason", "is", null)
         .not("category", "is", null);
@@ -843,6 +908,9 @@ Deno.serve(async (req: Request) => {
 
       const groupMap = new Map<string, { reason: string; category: string; count: number; lines: Set<string> }>();
       for (const evt of recentEvents ?? []) {
+        // Running Slow is an informational condition, not an issue — exclude it
+        // so a chronically slow line doesn't flood the recurring-issue channel.
+        if (isRunningSlow(evt)) continue;
         const key = `${evt.reason}|||${evt.category}`;
         const existing = groupMap.get(key);
         if (existing) {

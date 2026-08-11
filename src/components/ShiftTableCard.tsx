@@ -15,7 +15,6 @@ import { fetchHourlyRatedSpeeds } from '@/lib/jobSnapshots';
 import { loadMonitoringRecord } from '@/lib/monitoring';
 import { ShiftTable } from '@/components/ShiftTable';
 
-const TABLE_ROTATE_MS = 20000;
 const DEFAULT_SUMMARY_MS = 30000;
 
 interface ShiftTableCardProps {
@@ -23,6 +22,7 @@ interface ShiftTableCardProps {
   date: string;
   summaryRefreshMs?: number;
   previous?: boolean;
+  consoleTime?: string;
 }
 
 function dateToStr(d: Date): string {
@@ -85,26 +85,17 @@ export function ShiftTableCard({
   date,
   summaryRefreshMs = DEFAULT_SUMMARY_MS,
   previous = false,
+  consoleTime,
 }: ShiftTableCardProps) {
   const [summary, setSummary] = useState<HourlySummaryEntry[]>([]);
   const [ratedSpeeds, setRatedSpeeds] = useState<Record<number, number>>({});
   const [downtimeEvents, setDowntimeEvents] = useState<DowntimeEvent[]>([]);
   const [savedRows, setSavedRows] = useState<Record<number, ShiftRow> | null>(null);
   const [boardLoading, setBoardLoading] = useState(false);
-  const [now, setNow] = useState(Date.now());
-  const [page, setPage] = useState(0);
-  const [switchAt, setSwitchAt] = useState(Date.now() + TABLE_ROTATE_MS);
-  const [rowsPerPage, setRowsPerPage] = useState<number | null>(null);
+  const [rowHeight, setRowHeight] = useState<number | null>(null);
   const tableCardRef = useRef<HTMLDivElement>(null);
   const tableWrapRef = useRef<HTMLDivElement>(null);
   const tableFootRef = useRef<HTMLParagraphElement>(null);
-  const rowHeightRef = useRef(0);
-
-  // Live clock tick so the page-countdown "next in Ns" stays fresh.
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
 
   const activeHours = useMemo(() => getActiveHours(shift, []), [shift]);
 
@@ -148,8 +139,9 @@ export function ShiftTableCard({
     };
   }, [shift, date, summaryRefreshMs]);
 
-  // Adaptive paging: measure how many table rows fit the card's visible area
-  // and rotate through pages so no row is hidden by scrolling.
+  // Stretch-to-fill: measure the card's usable table area and distribute it
+  // evenly across every hourly row so the full shift fits with no paging and
+  // no scroll. Re-measures whenever the card or table wrap resizes.
   useEffect(() => {
     const card = tableCardRef.current;
     const wrap = tableWrapRef.current;
@@ -159,19 +151,17 @@ export function ShiftTableCard({
     const measure = () => {
       const totalRows = activeHours.length;
       if (totalRows <= 0) return;
-      if (rowHeightRef.current <= 0 && wrap.offsetHeight > 0) {
-        rowHeightRef.current = wrap.offsetHeight / totalRows;
-      }
-      if (rowHeightRef.current <= 0) return;
       const wrapTop = wrap.getBoundingClientRect().top - card.getBoundingClientRect().top;
-      const available = card.clientHeight - wrapTop - foot.getBoundingClientRect().height - 4;
-      const per = Math.max(1, Math.floor(available / rowHeightRef.current));
-      setRowsPerPage((prev) => (prev === per ? prev : per));
+      const header = wrap.querySelector('thead')?.getBoundingClientRect().height ?? 0;
+      const available = card.clientHeight - wrapTop - header - foot.getBoundingClientRect().height - 4;
+      const per = Math.max(1, Math.floor((available * 0.97) / totalRows));
+      setRowHeight((prev) => (prev === per ? prev : per));
     };
 
     const frame = requestAnimationFrame(() => requestAnimationFrame(measure));
     const ro = new ResizeObserver(measure);
     ro.observe(card);
+    ro.observe(wrap);
     window.addEventListener('resize', measure);
     return () => {
       cancelAnimationFrame(frame);
@@ -179,48 +169,6 @@ export function ShiftTableCard({
       window.removeEventListener('resize', measure);
     };
   }, [activeHours.length]);
-
-  const pageCount = rowsPerPage
-    ? Math.max(1, Math.ceil(activeHours.length / rowsPerPage))
-    : 1;
-  const shouldPage = pageCount > 1;
-
-  // Auto-rotate through the table pages every TABLE_ROTATE_MS.
-  useEffect(() => {
-    if (!shouldPage) return;
-    const id = window.setInterval(() => {
-      setPage((p) => (p + 1) % pageCount);
-      setSwitchAt(Date.now() + TABLE_ROTATE_MS);
-    }, TABLE_ROTATE_MS);
-    return () => window.clearInterval(id);
-  }, [shouldPage, pageCount]);
-
-  // Start from the first page whenever the shift / page count changes.
-  useEffect(() => {
-    setPage(0);
-  }, [pageCount, activeHours.length]);
-
-  // The page of hourly rows currently shown in the table (all rows when short).
-  const displayHours = useMemo(() => {
-    if (!rowsPerPage) return activeHours;
-    const start = Math.min(page * rowsPerPage, Math.max(0, activeHours.length - rowsPerPage));
-    return activeHours.slice(start, start + rowsPerPage);
-  }, [rowsPerPage, page, activeHours]);
-
-  // "18:00 – 00:00" style label for the visible page.
-  const pageLabel = useMemo(() => {
-    if (displayHours.length === 0) return '';
-    const first = displayHours[0]?.split(' - ')[0]?.trim() ?? '';
-    const last = displayHours[displayHours.length - 1]?.split(' - ')[1]?.trim() ?? '';
-    return first ? `${first} – ${last}` : '';
-  }, [displayHours]);
-
-  const nextInSeconds = Math.max(0, Math.ceil((switchAt - now) / 1000));
-
-  const switchPage = useCallback((p: number) => {
-    setPage(p);
-    setSwitchAt(Date.now() + TABLE_ROTATE_MS);
-  }, []);
 
   const intervals = useMemo(() => {
     const startStr = activeHours[0]?.split(' - ')[0]?.trim();
@@ -271,8 +219,9 @@ export function ShiftTableCard({
       })),
       activeHours,
       date,
+      consoleTime,
     );
-  }, [downtimeEvents, activeHours, date]);
+  }, [downtimeEvents, activeHours, date, consoleTime]);
 
   // Rows for the Monitoring ShiftTable, auto-filled from the live OFS data
   // (rated speed, output and downtime logs). Quality, Safety, Yield and Scrap
@@ -307,17 +256,8 @@ export function ShiftTableCard({
   const noopRowChange = useCallback(() => {}, []);
   const noopToggle = useCallback(() => {}, []);
 
-  // Rows for the visible page, remapped back to 0-based keys for the table.
-  const displayRows = useMemo<Record<number, ShiftRow>>(() => {
-    if (!rowsPerPage) return tableRows;
-    const start = Math.min(page * rowsPerPage, Math.max(0, activeHours.length - rowsPerPage));
-    const result: Record<number, ShiftRow> = {};
-    for (let j = 0; j < displayHours.length; j++) {
-      const orig = start + j;
-      if (tableRows[orig]) result[j] = tableRows[orig]!;
-    }
-    return result;
-  }, [rowsPerPage, page, activeHours.length, tableRows, displayHours]);
+  // All rows at once — no paging, rows are stretched to fill the card.
+  const displayRows = tableRows;
 
   const totals = useMemo(() => {
     let out = 0;
@@ -349,7 +289,7 @@ export function ShiftTableCard({
         <div className="flex items-center gap-2">
           <TrendingUp size={15} className="text-slate-700" />
           <h3 className="m-0 text-[13px] font-bold uppercase tracking-wide text-slate-800">
-            Production — {SHIFT_LABELS[shift]} · {pageLabel || date || '—'}
+            Production — {SHIFT_LABELS[shift]} · {date || '—'}
           </h3>
           {previous && (
             <span className="px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide bg-amber-500 text-white">
@@ -363,36 +303,6 @@ export function ShiftTableCard({
           )}
         </div>
 
-        {shouldPage && (
-          <div className="flex items-center gap-1.5 shrink-0" role="tablist" aria-label="Table pages">
-            {Array.from({ length: pageCount }).map((_, i) => {
-              const active = page === i;
-              const start = Math.min(i * rowsPerPage!, Math.max(0, activeHours.length - rowsPerPage!));
-              const label = activeHours[start]?.split(' - ')[0]?.trim();
-              return (
-                <button
-                  key={i}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => switchPage(i)}
-                  className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border transition-colors ${
-                    active
-                      ? 'bg-blue-900 text-white border-blue-900'
-                      : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
-                  }`}
-                  title={`Show page ${i + 1} of ${pageCount}`}
-                >
-                  {i + 1} · {label ?? '—'}
-                </button>
-              );
-            })}
-            <span className="text-[11px] font-semibold text-slate-500 tabular-nums ml-1">
-              next in {nextInSeconds}s
-            </span>
-          </div>
-        )}
-
         <div className="flex items-center gap-3 text-[11px] font-semibold text-slate-600 tabular-nums">
           <span>Output: {totals.out.toLocaleString()}</span>
           <span>Avg OEE: {totals.avgOee}%</span>
@@ -400,13 +310,15 @@ export function ShiftTableCard({
         </div>
       </div>
 
-      <div ref={tableWrapRef} className="min-h-0">
+      <div ref={tableWrapRef} className="min-h-0 flex-1 overflow-hidden">
         <ShiftTable
-          hours={displayHours}
+          hours={activeHours}
           rows={displayRows}
-          rowCount={displayHours.length}
+          rowCount={activeHours.length}
           onRowChange={noopRowChange}
           onToggle={noopToggle}
+          hideQaFields
+          rowHeight={rowHeight}
         />
       </div>
 

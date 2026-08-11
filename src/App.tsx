@@ -594,7 +594,7 @@ function epochToConsoleTime(
   // the shift's time intervals, and fill the Downtime Logs column.
   // For overnight shifts (start hour >= 12), also fetch the next day because
   // the shift spans midnight (e.g. a 20:00 shift on date D runs into D+1).
-  const handleImportDowntime = useCallback(async () => {
+  const handleImportDowntime = useCallback(async (consoleTime?: string) => {
     const date = data.date;
     if (!date) {
       throw new Error('Select a date first at the top of the monitoring table.');
@@ -614,7 +614,8 @@ function epochToConsoleTime(
       const logs = computeDowntimeLogs(
         events.map((e) => ({ startText: e.start_text, endText: epochToConsoleTime(e.end_epoch, e.start_epoch, e.start_text), category: e.category, reason: e.reason, comments: e.comments })),
         activeHours,
-        date
+        date,
+        consoleTime
       );
       const next = cloneData(prev);
       for (let i = 0; i < rowCount; i++) {

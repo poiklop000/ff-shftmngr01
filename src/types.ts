@@ -374,7 +374,8 @@ function shiftTimeToMinutes(time: string, shiftStartMin: number): number {
 export function computeDowntimeLogs(
   events: Array<{ startText: string | null; endText: string | null; category: string | null; reason: string | null; comments?: { text: string; systemPost: boolean }[] | null }>,
   hours: string[],
-  shiftDate: string
+  shiftDate: string,
+  nowText?: string | null
 ): Record<number, string> {
   const result: Record<number, string> = {};
   const shiftStartStr = hours.length > 0 ? hours[0]!.split(' - ')[0]!.trim() : null;
@@ -392,7 +393,9 @@ export function computeDowntimeLogs(
     const startMin = consoleTimeToShiftMinutes(evt.startText, shiftDate);
     const endMin = evt.endText
       ? consoleTimeToShiftMinutes(evt.endText, shiftDate)
-      : startMin + 60; // assume up to an hour if still ongoing
+      : nowText
+        ? consoleTimeToShiftMinutes(nowText, shiftDate)
+        : startMin + 60; // assume up to an hour if still ongoing
 
     // Skip events that don't overlap this shift's time window. Both event
     // times and shift window are in "minutes since shift-date midnight"

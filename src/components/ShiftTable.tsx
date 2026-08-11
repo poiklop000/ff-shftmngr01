@@ -13,9 +13,11 @@ interface ShiftTableProps {
   rowCount: number;
   onRowChange: (index: number, field: keyof ShiftRow, value: string) => void;
   onToggle: (index: number, field: 'q' | 's') => void;
+  hideQaFields?: boolean;
+  rowHeight?: number | null;
 }
 
-export function ShiftTable({ hours, rows, rowCount, onRowChange, onToggle }: ShiftTableProps) {
+export function ShiftTable({ hours, rows, rowCount, onRowChange, onToggle, hideQaFields = false, rowHeight = null }: ShiftTableProps) {
   return (
     <div className="table-wrapper">
       <table>
@@ -25,17 +27,25 @@ export function ShiftTable({ hours, rows, rowCount, onRowChange, onToggle }: Shi
             <th style={{ width: 110 }}>RATED SPEED</th>
             <th style={{ width: 110 }}>ACTUAL OUTPUT</th>
             <th style={{ width: 80 }}>OEE %</th>
-            <th style={{ width: 70 }}>QUALITY</th>
-            <th style={{ width: 70 }}>SAFETY</th>
+            {!hideQaFields && (
+              <>
+                <th style={{ width: 70 }}>QUALITY</th>
+                <th style={{ width: 70 }}>SAFETY</th>
+              </>
+            )}
             <th style={{ width: 380 }}>DOWNTIME LOGS</th>
-            <th style={{ width: 110 }}>FILLER YIELD</th>
-            <th style={{ width: 110 }}>SCRAP</th>
+            {!hideQaFields && (
+              <>
+                <th style={{ width: 110 }}>FILLER YIELD</th>
+                <th style={{ width: 110 }}>SCRAP</th>
+              </>
+            )}
           </tr>
         </thead>
         <tbody>
           {rowCount === 0 ? (
             <tr>
-              <td colSpan={9} style={{ padding: '30px', color: 'var(--text-muted)', fontSize: '14px' }}>
+              <td colSpan={hideQaFields ? 5 : 9} style={{ padding: '30px', color: 'var(--text-muted)', fontSize: '14px' }}>
                 Configure your custom start time, end time, and interval above, then click &quot;Generate Table&quot;.
               </td>
             </tr>
@@ -47,6 +57,8 @@ export function ShiftTable({ hours, rows, rowCount, onRowChange, onToggle }: Shi
                 rowCount={rowCount}
                 hour={hours[i] ?? ''}
                 row={rows[i]}
+                hideQaFields={hideQaFields}
+                rowHeight={rowHeight}
                 onChange={(field, value) => onRowChange(i, field, value)}
                 onToggle={(field) => onToggle(i, field)}
               />
@@ -63,11 +75,13 @@ interface RowProps {
   rowCount: number;
   hour: string;
   row: ShiftRow;
+  hideQaFields?: boolean;
+  rowHeight?: number | null;
   onChange: (field: keyof ShiftRow, value: string) => void;
   onToggle: (field: 'q' | 's') => void;
 }
 
-function Row({ index, rowCount, hour, row, onChange, onToggle }: RowProps) {
+function Row({ index, rowCount, hour, row, hideQaFields = false, rowHeight = null, onChange, onToggle }: RowProps) {
   const spdRef = useRef<HTMLInputElement>(null);
   const outRef = useRef<HTMLInputElement>(null);
   const yldRef = useRef<HTMLInputElement>(null);
@@ -88,11 +102,13 @@ function Row({ index, rowCount, hour, row, onChange, onToggle }: RowProps) {
 
   useEnterToNext(spdRef, outId);
   useEnterToNext(outRef, logId);
-  useEnterToNext(yldRef, scrId);
-  useEnterToNext(
-    scrRef,
-    index < rowCount - 1 ? `spd-${index + 1}` : 'tx-product'
-  );
+  if (!hideQaFields) {
+    useEnterToNext(yldRef, scrId);
+    useEnterToNext(
+      scrRef,
+      index < rowCount - 1 ? `spd-${index + 1}` : 'tx-product'
+    );
+  }
 
   const rowOut = parseNumber(row.out);
   const rowSpd = parseNumber(row.spd);
@@ -110,9 +126,22 @@ function Row({ index, rowCount, hour, row, onChange, onToggle }: RowProps) {
   const scrapVal = row.scr.replace(/%/g, '').trim();
   const scrapClass = scrapVal === '' ? '' : '';
 
+  const compactLog = hideQaFields
+    ? row.log
+        .split('\n')
+        .map((line) => {
+          const trimmed = line.trim();
+          return trimmed.startsWith('*(')
+            ? trimmed.slice(2, trimmed.endsWith(')') ? -1 : undefined).trim()
+            : trimmed;
+        })
+        .filter(Boolean)
+        .join(' · ')
+    : row.log;
+
   return (
-    <tr>
-      <td style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', color: 'var(--app-fg)' }}>
+    <tr style={rowHeight ? { height: rowHeight } : undefined}>
+      <td style={{ fontWeight: 700, whiteSpace: 'nowrap', color: 'var(--app-fg)' }}>
         {hour}
       </td>
       <td>
@@ -146,57 +175,73 @@ function Row({ index, rowCount, hour, row, onChange, onToggle }: RowProps) {
           {rowOut > 0 && rowSpd > 0 ? `${oee.toFixed(2)}%` : '0.00%'}
         </span>
       </td>
+      {!hideQaFields && (
+        <>
+          <td>
+            <ToggleBtn state={row.q} onClick={() => onToggle('q')} title="Q" />
+          </td>
+          <td>
+            <ToggleBtn state={row.s} onClick={() => onToggle('s')} title="S" />
+          </td>
+        </>
+      )}
       <td>
-        <ToggleBtn state={row.q} onClick={() => onToggle('q')} title="Q" />
+        {hideQaFields ? (
+          <div className="board-log-compact" title={row.log}>
+            {compactLog || '—'}
+          </div>
+        ) : (
+          <>
+            <textarea
+              ref={logRef}
+              id={logId}
+              className="table-text-area no-print"
+              value={row.log}
+              onChange={(e) => onChange('log', e.target.value)}
+              placeholder="Type shift delays... (Enter for new line, Tab for next field)"
+            />
+            <div className="print-text-block print-only">{row.log}</div>
+          </>
+        )}
       </td>
-      <td>
-        <ToggleBtn state={row.s} onClick={() => onToggle('s')} title="S" />
-      </td>
-      <td>
-        <textarea
-          ref={logRef}
-          id={logId}
-          className="table-text-area no-print"
-          value={row.log}
-          onChange={(e) => onChange('log', e.target.value)}
-          placeholder="Type shift delays... (Enter for new line, Tab for next field)"
-        />
-        <div className="print-text-block print-only">{row.log}</div>
-      </td>
-      <td>
-        <input
-          ref={yldRef}
-          id={yldId}
-          type="text"
-          className={`table-input ${yieldClass}`}
-          inputMode="decimal"
-          value={row.yld}
-          placeholder="0.0%"
-          onChange={(e) => onChange('yld', e.target.value)}
-          onBlur={(e) => {
-            const clean = e.target.value.replace(/%/g, '').trim();
-            const formatted = clean ? `${clean}%` : '';
-            onChange('yld', formatted);
-          }}
-        />
-      </td>
-      <td>
-        <input
-          ref={scrRef}
-          id={scrId}
-          type="text"
-          className={`table-input ${scrapClass}`}
-          inputMode="decimal"
-          value={row.scr}
-          placeholder="0.0%"
-          onChange={(e) => onChange('scr', e.target.value)}
-          onBlur={(e) => {
-            const clean = e.target.value.replace(/%/g, '').trim();
-            const formatted = clean ? `${clean}%` : '';
-            onChange('scr', formatted);
-          }}
-        />
-      </td>
+      {!hideQaFields && (
+        <>
+          <td>
+            <input
+              ref={yldRef}
+              id={yldId}
+              type="text"
+              className={`table-input ${yieldClass}`}
+              inputMode="decimal"
+              value={row.yld}
+              placeholder="0.0%"
+              onChange={(e) => onChange('yld', e.target.value)}
+              onBlur={(e) => {
+                const clean = e.target.value.replace(/%/g, '').trim();
+                const formatted = clean ? `${clean}%` : '';
+                onChange('yld', formatted);
+              }}
+            />
+          </td>
+          <td>
+            <input
+              ref={scrRef}
+              id={scrId}
+              type="text"
+              className={`table-input ${scrapClass}`}
+              inputMode="decimal"
+              value={row.scr}
+              placeholder="0.0%"
+              onChange={(e) => onChange('scr', e.target.value)}
+              onBlur={(e) => {
+                const clean = e.target.value.replace(/%/g, '').trim();
+                const formatted = clean ? `${clean}%` : '';
+                onChange('scr', formatted);
+              }}
+            />
+          </td>
+        </>
+      )}
     </tr>
   );
 }

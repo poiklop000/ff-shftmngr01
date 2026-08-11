@@ -41,7 +41,7 @@ interface MonitoringViewProps {
   onClearShift: (shift: Shift) => void;
   onExportReport: () => void;
   onImportCounter: () => Promise<void>;
-  onImportDowntime: () => Promise<void>;
+  onImportDowntime: (consoleTime?: string) => Promise<void>;
   onSaveRecord: () => Promise<void>;
   onLoadRecord: () => Promise<void>;
   hasSavedRecord: boolean;
@@ -219,7 +219,7 @@ export function MonitoringView({
     setImportingDowntime(true);
     setImportMsg(null);
     try {
-      await onImportDowntime();
+      await onImportDowntime(consoleTime);
       setImportMsg('Downtime logs imported');
     } catch (err) {
       setImportMsg(err instanceof Error ? err.message : 'Import failed');

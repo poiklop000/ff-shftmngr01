@@ -253,6 +253,16 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
   const stateColor = LINE_STATE_COLORS[lineStateClass];
   const stateLabel = runstate?.description || runstate?.name || runstate?.state || 'Idle';
 
+  // TEMP-PREVIEW: `?downtimePopup=1` forces the popup open regardless of line
+  // state so it can be inspected without waiting for real downtime.
+  const forcePopupPreview = typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('downtimePopup') === '1';
+  const showDowntimePopup = lineStateClass === 'downtime' && mainView === 'status' || forcePopupPreview;
+  const showDowntimeFlashBorder = lineStateClass === 'downtime' && mainView !== 'status' && !forcePopupPreview;
+  const downtimeElapsed = runstate?.start && runstate.start > 0
+    ? formatStateDuration(runstate, now)
+    : (runstate?.duration && runstate.duration > 0 ? formatElapsedMs(runstate.duration) : '-');
+
   const currentRate = status?.process?.throughunitpersister?.rate ?? 0;
 
   const order = job?.$order;
@@ -278,6 +288,52 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
       filterByShiftWindow(downtimeEvents, shift, [], date, (e) => e.start_text, undefined, downtimeEventEndText),
     [downtimeEvents, shift, date],
   );
+
+  // The active downtime event backing the red popup: an unresolved event whose
+  // start matches the current run-state start, falling back to the most recent
+  // unresolved one.
+  const activeDowntimeEvent = useMemo(() => {
+    if (lineStateClass !== 'downtime' && !forcePopupPreview) return undefined;
+    const runStateStart = runstate?.start ?? 0;
+    const windowEvents = forcePopupPreview
+      ? shiftDowntimeEvents
+      : shiftDowntimeEvents.filter((e) => !e.resolved);
+    if (windowEvents.length === 0) return undefined;
+    if (runStateStart > 0) {
+      const matched = windowEvents.find(
+        (e) => Math.abs((e.start_epoch ?? 0) - runStateStart) < 5 * 60_000,
+      );
+      if (matched) return matched;
+    }
+    return windowEvents[windowEvents.length - 1];
+  }, [lineStateClass, forcePopupPreview, runstate?.start, shiftDowntimeEvents]);
+
+  const activeIsSlow = activeDowntimeEvent?.downtime_type === 'RUNNING_SLOW';
+  const popupStyle = activeIsSlow
+    ? {
+        borderColor: '#ca8a04',
+        background: 'linear-gradient(180deg, #fefce8, #fef9c3)',
+        overlay: 'rgba(133, 77, 14, 0.35)',
+        dot: '#ca8a04',
+        titleColor: '#854d0e',
+        tile: 'bg-yellow-100 border-yellow-200',
+        textColor: 'text-yellow-900',
+        tileSolid: 'bg-yellow-200',
+        divider: 'border-yellow-200',
+        footerColor: 'text-yellow-800',
+      }
+    : {
+        borderColor: '#dc2626',
+        background: 'linear-gradient(180deg, #fef2f2, #fee2e2)',
+        overlay: 'rgba(127, 29, 29, 0.45)',
+        dot: '#dc2626',
+        titleColor: '#991b1b',
+        tile: 'bg-red-100 border-red-200',
+        textColor: 'text-red-900',
+        tileSolid: 'bg-red-200',
+        divider: 'border-red-200',
+        footerColor: 'text-red-700',
+      };
 
   const estFinish = useMemo(() => {
     if (remaining <= 0) return '--:--:--';
@@ -396,7 +452,7 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 flex-1 min-h-0">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 flex-[0.4] min-h-0">
               <StatusTile
                 icon={<Gauge size={22} />}
                 label="Line State"
@@ -440,39 +496,39 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
               ))}
             </div>
 
-            <div className="shrink-0 card rounded-lg px-4 py-3 border border-blue-200 bg-blue-50 text-blue-900">
-              <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-current">
+            <div className="shrink-0 card rounded-lg px-4 py-3 border border-blue-200 bg-blue-50 text-blue-900 flex-1 min-h-0 flex flex-col" style={{ zoom: 0.97 }}>
+              <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-current shrink-0">
                 <div className="flex items-center gap-2">
-                  <Package size={16} />
-                  <h3 className="m-0 text-[14px] font-bold uppercase tracking-wide">Active Job</h3>
+                  <Package size={20} />
+                  <h3 className="m-0 text-xl font-bold uppercase tracking-wide">Active Job</h3>
                   {override && (
-                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide bg-blue-900 text-white">
+                    <span className="px-2.5 py-1 rounded-full text-base font-bold uppercase tracking-wide bg-blue-900 text-white">
                       Corrected
                     </span>
                   )}
                 </div>
-                {job && <span className="text-[12px] font-bold text-blue-800">Job #{jobId ?? '—'}</span>}
+                {job && <span className="text-lg font-bold text-blue-800">Job #{jobId ?? '—'}</span>}
               </div>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
                 <Field label="Product" value={productName} />
                 <Field label="SKU" value={sku} />
                 <Field label="Target Quantity" value={target.toLocaleString()} />
                 <Field label="Rated Speed" value={ratedSpeed > 0 ? `${ratedSpeed.toLocaleString()} /hr` : '-'} />
               </div>
-              <div className="mt-3">
-                <div className="flex justify-between items-center mb-1 text-[13px] font-semibold text-blue-900">
+              <div className="mt-4 flex-1 min-h-0 flex flex-col justify-center">
+                <div className="flex justify-between items-center mb-2 text-lg font-semibold text-blue-900">
                   <span>Production Progress</span>
                   <span className="tabular-nums">
                     {produced.toLocaleString()} / {target.toLocaleString()} ({progress.toFixed(1)}%)
                   </span>
                 </div>
-                <div className="w-full h-3.5 rounded-full bg-blue-100 overflow-hidden">
+                <div className="w-full h-5 rounded-full bg-blue-100 overflow-hidden">
                   <div
                     className="h-full rounded-full transition-all duration-700"
                     style={{ width: `${progress}%`, backgroundColor: stateColor }}
                   />
                 </div>
-                <div className="flex justify-between mt-1.5 text-[12px] text-blue-700 font-medium">
+                <div className="flex justify-between mt-2.5 text-lg text-blue-700 font-medium">
                   <span>Remaining: {remaining.toLocaleString()}</span>
                   {remaining > 0 && (currentRate > 0 || ratedSpeed > 0) && (
                     <span>Est. finish: {estFinish}</span>
@@ -521,7 +577,9 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
             mainView === 'table' ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none'
           }`}
         >
-          <ShiftTableCard shift={shift} date={date} summaryRefreshMs={summaryRefreshMs} />
+          <div className={`h-full ${showDowntimeFlashBorder ? 'downtime-flash' : ''}`}>
+            <ShiftTableCard shift={shift} date={date} summaryRefreshMs={summaryRefreshMs} consoleTime={consoleTime} />
+          </div>
         </div>
 
         {/* ---- Previous shift table view ---- */}
@@ -531,10 +589,72 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
               mainView === 'prevTable' ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none'
             }`}
           >
-            <ShiftTableCard shift={prevShift} date={prevDate} summaryRefreshMs={summaryRefreshMs} previous />
+            <div className={`h-full ${showDowntimeFlashBorder ? 'downtime-flash' : ''}`}>
+              <ShiftTableCard shift={prevShift} date={prevDate} summaryRefreshMs={summaryRefreshMs} previous consoleTime={consoleTime} />
+            </div>
           </div>
         )}
-      </div>
+        </div>
+
+      {/* ---- Red Downtime popup ---- */}
+      {showDowntimePopup && (
+        <div
+          className="modal-overlay"
+          style={{ zIndex: 200, background: popupStyle.overlay, backdropFilter: 'blur(6px)', pointerEvents: 'none' }}
+        >
+          <div
+            className="modal-card"
+            style={{ maxWidth: 560, border: `3px solid ${popupStyle.borderColor}`, background: popupStyle.background }}
+            role="dialog"
+            aria-modal="true"
+            aria-label={activeIsSlow ? 'Line running slow alert' : 'Line downtime alert'}
+          >
+            <div className={`flex items-center gap-2 mb-3 pb-3 border-b-2 ${popupStyle.divider}`}>
+              <span className="inline-block w-4 h-4 rounded-full animate-pulse" style={{ backgroundColor: popupStyle.dot }} />
+              <h2 className="m-0 text-2xl font-bold uppercase tracking-wide" style={{ color: popupStyle.titleColor }}>
+                {activeIsSlow ? 'Running Slow' : 'Downtime'}
+              </h2>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className={`rounded-lg p-3 border ${popupStyle.tile}`}>
+                <div className={`text-sm font-bold uppercase tracking-wide opacity-70 mb-1 ${popupStyle.textColor}`}>Line</div>
+                <div className={`text-xl font-bold ${popupStyle.textColor}`}>{lineName}</div>
+              </div>
+              <div className={`rounded-lg p-3 border ${popupStyle.tile}`}>
+                <div className={`text-sm font-bold uppercase tracking-wide opacity-70 mb-1 ${popupStyle.textColor}`}>Type</div>
+                <div className={`text-xl font-bold ${popupStyle.textColor}`}>
+                  {activeDowntimeEvent?.downtime_type === 'RUNNING_SLOW' ? 'Running Slow' : (activeDowntimeEvent?.downtime_type || stateLabel)}
+                </div>
+              </div>
+              <div className={`rounded-lg p-3 border ${popupStyle.tile}`}>
+                <div className={`text-sm font-bold uppercase tracking-wide opacity-70 mb-1 ${popupStyle.textColor}`}>Elapsed</div>
+                <div className={`text-xl font-bold tabular-nums ${popupStyle.textColor}`}>{downtimeElapsed}</div>
+              </div>
+              <div className={`rounded-lg p-3 border ${popupStyle.tile}`}>
+                <div className={`text-sm font-bold uppercase tracking-wide opacity-70 mb-1 ${popupStyle.textColor}`}>Console</div>
+                <div className={`text-xl font-bold tabular-nums ${popupStyle.textColor}`}>{formatConsoleTime(consoleTime)}</div>
+              </div>
+            </div>
+            <div className={`mt-3 rounded-lg p-3 border ${popupStyle.tile}`}>
+              <div className={`text-sm font-bold uppercase tracking-wide opacity-70 mb-1 ${popupStyle.textColor}`}>Reason</div>
+              <div className={`text-lg font-bold ${popupStyle.textColor}`}>
+                {activeDowntimeEvent?.reason?.trim() || 'Not classified yet'}
+              </div>
+              {activeDowntimeEvent?.category?.trim() ? (
+                <div className={`mt-1 inline-block rounded-full px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide ${popupStyle.tileSolid}`} style={{ color: popupStyle.titleColor }}>
+                  {activeDowntimeEvent.category}
+                </div>
+              ) : null}
+            </div>
+            <div className={`flex items-center gap-2 mt-4 pt-3 border-t text-sm font-semibold ${popupStyle.divider} ${popupStyle.footerColor}`}>
+              <AlertTriangle size={16} className="shrink-0" />
+              {activeIsSlow
+                ? 'The line is running below rated speed.'
+                : 'The line is down.'}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -581,8 +701,8 @@ function StatusTile({
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-[10px] font-bold uppercase tracking-wide opacity-70 mb-0.5">{label}</div>
-      <div className="text-[13px] font-bold tabular-nums">{value}</div>
+      <div className="text-base font-bold uppercase tracking-wide opacity-70 mb-1">{label}</div>
+      <div className="text-2xl font-bold tabular-nums leading-tight break-words">{value}</div>
     </div>
   );
 }
@@ -610,4 +730,14 @@ function formatElapsedMs(ms: number): string {
 
 function pad(n: number): string {
   return n.toString().padStart(2, '0');
+}
+
+// Format a raw OFS console time like "2026-08-11 17:34:42.477" down to just the
+// clock time "17:34:42" so it fits the popup tiles. Falls back to the raw value
+// (or "-") when it doesn't look like a timestamp.
+function formatConsoleTime(value: string | undefined | null): string {
+  if (!value) return '-';
+  const match = value.match(/(\d{1,2}):(\d{2}):(\d{2})/);
+  if (!match) return value;
+  return `${match[1]}:${match[2]}:${match[3]}`;
 }

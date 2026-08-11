@@ -538,23 +538,52 @@ Deno.serve(async (req: Request) => {
 
     // Test mode: a client (Settings → Send Test Alert) calls with {"test": true}
     // to verify the webhook without waiting for a real downtime. Runs even if
-    // alerts are disabled, as long as a webhook URL is configured.
+    // alerts are disabled, as long as a webhook URL is configured. Pass an
+    // optional {"reason": "..."} to preview the real occurred card with that
+    // reason (defaults to the unclassified "Unallocated" case).
     let testRequested = false;
+    let testReason: string | null = null;
     try {
-      testRequested = (await req.clone().json())?.test === true;
+      const body = (await req.clone().json()) as { test?: boolean; reason?: string | null };
+      testRequested = body.test === true;
+      testReason = body.reason ?? null;
     } catch {
       testRequested = false;
     }
     if (testRequested) {
-      const payload = buildTestMessage();
+      let payload: Record<string, unknown>;
+      let testMessage = "Test Alert";
+      if (testReason !== null) {
+        const mockEvt: DowntimeRow = {
+          id: 0,
+          console_name: "Production Line 1",
+          downtime_type: "UNPLANNED",
+          reason: testReason,
+          category: "Unallocated",
+          source: "test",
+          start_epoch: Date.now() - 10 * 60_000,
+          duration_ms: 10 * 60_000,
+          start_text: null,
+          crew_name: null,
+          resolved: false,
+          end_epoch: null,
+          alert_sent: false,
+          resolved_alert_sent: false,
+          last_escalation_minutes: null,
+        };
+        payload = buildOccurredMessage(mockEvt, null);
+        testMessage = `Test Alert (${testReason})`;
+      } else {
+        payload = buildTestMessage();
+      }
       const res = await sendTeams(webhookUrl, payload);
       await logAlert(supabase, {
         alertType: "test",
         eventId: null,
-        reason: null,
+        reason: testReason,
         category: null,
         product: null,
-        message: "Test Alert",
+        message: testMessage,
         status: res.ok ? "sent" : "failed",
         httpStatus: res.httpStatus,
       });

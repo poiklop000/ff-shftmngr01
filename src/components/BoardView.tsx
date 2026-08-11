@@ -646,11 +646,14 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
                 </div>
               ) : null}
             </div>
-            <div className={`flex items-center gap-2 mt-4 pt-3 border-t text-sm font-semibold ${popupStyle.divider} ${popupStyle.footerColor}`}>
-              <AlertTriangle size={16} className="shrink-0" />
-              {activeIsSlow
-                ? 'The line is running below rated speed.'
-                : 'The line is down.'}
+            <div className={`flex flex-col gap-1 mt-4 pt-3 border-t text-sm font-semibold ${popupStyle.divider} ${popupStyle.footerColor}`}>
+              <div className="flex items-center gap-2">
+                <AlertTriangle size={16} className="shrink-0" />
+                {activeIsSlow
+                  ? 'The line is running below rated speed.'
+                  : 'The line is down.'}
+              </div>
+              {!activeIsSlow && <div className="pl-6">Please provide reason or next job.</div>}
             </div>
           </div>
         </div>

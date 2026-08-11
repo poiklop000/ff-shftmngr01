@@ -217,6 +217,17 @@ function typeStyle(downtimeType: string | null): TypeStyle {
   }
 }
 
+// OFS leaves a span "Unallocated" until a user classifies it, so a reason of
+// "Unallocated" (or missing) is not an error — it just means no one has
+// recorded a cause yet. Make that explicit on the alert so operators don't
+// mistake it for a system failure.
+function formatReason(reason: string | null): string {
+  const r = (reason ?? "").trim();
+  if (!r) return "Unallocated — reason not yet classified";
+  if (r.toUpperCase() === "UNALLOCATED") return `${r} — reason not yet classified`;
+  return r;
+}
+
 function buildRecurringIssueMessage(
   reason: string,
   category: string,
@@ -269,7 +280,7 @@ function buildOccurredMessage(
   const durationMs = evt.duration_ms ?? (nowMs - evt.start_epoch);
   const lineName = evt.console_name ?? "Production Line";
   const style = typeStyle(evt.downtime_type);
-  const reason = evt.reason ?? "No reason recorded";
+  const reason = formatReason(evt.reason);
   const category = evt.category ?? "Uncategorised";
   const startTime = evt.start_text ?? formatEpochLocal(evt.start_epoch);
 
@@ -306,7 +317,7 @@ function buildResolvedMessage(
   const durationMs = evt.duration_ms ?? (evt.end_epoch ? evt.end_epoch - evt.start_epoch : 0);
   const lineName = evt.console_name ?? "Production Line";
   const style = typeStyle(evt.downtime_type);
-  const reason = evt.reason ?? "No reason recorded";
+  const reason = formatReason(evt.reason);
   const category = evt.category ?? "Uncategorised";
   const startTime = evt.start_text ?? formatEpochLocal(evt.start_epoch);
   const endTime = evt.end_epoch ? formatEpochLocal(evt.end_epoch) : "Unknown";
@@ -347,7 +358,7 @@ function buildEscalationMessage(
   const durationMs = evt.duration_ms ?? (nowMs - evt.start_epoch);
   const lineName = evt.console_name ?? "Production Line";
   const style = typeStyle(evt.downtime_type);
-  const reason = evt.reason ?? "No reason recorded";
+  const reason = formatReason(evt.reason);
   const category = evt.category ?? "Uncategorised";
   const startTime = evt.start_text ?? formatEpochLocal(evt.start_epoch);
 

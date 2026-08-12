@@ -516,6 +516,11 @@ Deno.serve(async (req: Request) => {
     for (const rec of expressRecords) {
       const type = rec.downtime_type;
       if (!type) continue;
+      // Only supersede a live capture once the express record is resolved.
+      // While the event is still ongoing, capture-downtime is actively tracking
+      // it under a live span id; deleting that row would make capture re-insert
+      // it (fresh created_at + reset alert flags) and re-fire notifications.
+      if (!rec.resolved) continue;
       const dup = liveRows.find(
         (l) =>
           l.id !== rec.id &&

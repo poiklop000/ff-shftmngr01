@@ -147,6 +147,19 @@ function formatEpochLocal(epoch: number): string {
   return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}:${get("second")}.${ms}`;
 }
 
+// Two downtime windows overlap when each starts before the other ends.
+// Ongoing windows (null end) extend to "now".
+function windowsOverlap(
+  aStart: number,
+  aEnd: number | null,
+  bStart: number,
+  bEnd: number | null,
+): boolean {
+  const aEndAt = aEnd ?? Date.now();
+  const bEndAt = bEnd ?? Date.now();
+  return aStart <= bEndAt && bStart <= aEndAt;
+}
+
 interface JobContext {
   product: string | null;
   orderName: string | null;
@@ -668,6 +681,13 @@ Deno.serve(async (req: Request) => {
     // start (within a minute) and keep the most authoritative row per group:
     // prefer the express/history row, then the row with a specific reason
     // (over the generic "Unallocated"), then the earlier one.
+    //
+    // The live and express starts can also drift by far more than a minute —
+    // e.g. the live "job.work.downtime.named" span starts when the reason is
+    // assigned, well after the express "span.downtime.planned" span. Rows that
+    // share a downtime type, a specific reason and an overlapping window are
+    // merged into the same group too, otherwise a single event fires a
+    // duplicate alert chain.
     const grouped = new Map<string, DowntimeRow[]>();
     for (const evt of events) {
       const type = (evt.downtime_type ?? "").toUpperCase() || "UNKNOWN";
@@ -678,6 +698,25 @@ Deno.serve(async (req: Request) => {
           rows.push(evt);
           placed = true;
           break;
+        }
+      }
+      if (!placed) {
+        const specificReason = evt.reason && evt.reason !== "Unallocated" ? evt.reason : null;
+        if (specificReason) {
+          for (const [key, rows] of grouped) {
+            const [kType] = key.split("|");
+            if (kType !== type) continue;
+            const overlapsSameEvent = rows.some(
+              (r) =>
+                r.reason === specificReason &&
+                windowsOverlap(evt.start_epoch, evt.end_epoch, r.start_epoch, r.end_epoch),
+            );
+            if (overlapsSameEvent) {
+              rows.push(evt);
+              placed = true;
+              break;
+            }
+          }
         }
       }
       if (!placed) grouped.set(`${type}|${evt.start_epoch}`, [evt]);

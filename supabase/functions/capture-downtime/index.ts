@@ -75,6 +75,10 @@ interface DowntimeEvent {
   metadata: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
+  source?: string;
+  alert_sent?: boolean;
+  resolved_alert_sent?: boolean;
+  last_escalation_minutes?: number | null;
 }
 
 function getSupabase() {
@@ -153,16 +157,25 @@ function dedupeSpans(spans: OfsSpanItem[]): OfsSpanItem[] {
 // Select the spans we want to record as downtime-style events: planned +
 // unplanned downtime spans (identified by $reason.spanGroup), setup spans
 // (identified by state containing "setup"), and running-slow spans (identified
-// by state containing "slow"). Falls back to the top-level `downtime` field
-// for unplanned downtime when present.
+// by state containing "slow").
 //
-// OFS keeps every span in the items array with an ever-growing duration, even
-// after the line has moved on to a new state. The line can only be in one
-// non-production state at a time, so only the span(s) with the latest start
-// time are truly active — earlier ones have ended.
+// The top-level `downtime` field is the authoritative "is the line down right
+// now" signal: OFS returns it (with id + start) only while the line is in
+// planned or unplanned downtime, and omits it once the line resumes. OFS,
+// however, keeps every ended downtime span in the items array with an
+// ever-growing duration. Without this gate, a stale span re-inserts a brand
+// new downtime_events row on every run — resetting its alert flags — even
+// though the event actually ended. So downtime-group items are only considered
+// while the top-level `downtime` field is present.
+//
+// Setup and running-slow spans carry no spanGroup and do not surface in the
+// top-level `downtime` field, so they are always picked. The line can only be
+// in one non-production state at a time, so only the span(s) with the latest
+// start time are truly active — earlier ones have ended.
 function extractActiveSpans(spans: OfsSpansData | null): OfsSpanItem[] {
   if (!spans) return [];
   const items = spans.items ?? [];
+  const hasActiveDowntime = !!(spans.downtime?.id && spans.downtime?.start);
   const picks: OfsSpanItem[] = [];
 
   for (const item of items) {
@@ -171,12 +184,12 @@ function extractActiveSpans(spans: OfsSpansData | null): OfsSpanItem[] {
     const isDowntime = reason?.spanGroup === "downtime";
     const isSetup = item.state?.includes("setup") ?? false;
     const isSlow = item.state?.includes("slow") ?? false;
-    if (isDowntime || isSetup || isSlow) picks.push(item);
+    if ((isDowntime && hasActiveDowntime) || isSetup || isSlow) picks.push(item);
   }
 
-  if (spans.downtime?.id && spans.downtime?.start) {
+  if (hasActiveDowntime) {
     if (!picks.some((p) => p.id === spans.downtime!.id)) {
-      picks.push(spans.downtime);
+      picks.push(spans.downtime!);
     }
   }
 
@@ -301,6 +314,19 @@ function startsMatch(a: number | undefined, b: number | undefined): boolean {
   return Math.abs(a - b) <= 60_000;
 }
 
+// Two downtime windows overlap when each starts before the other ends.
+// Ongoing windows (null end) extend to "now".
+function windowsOverlap(
+  aStart: number,
+  aEnd: number | null,
+  bStart: number,
+  bEnd: number | null,
+): boolean {
+  const aEndAt = aEnd ?? Date.now();
+  const bEndAt = bEnd ?? Date.now();
+  return aStart <= bEndAt && bStart <= aEndAt;
+}
+
 async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<CaptureResult> {
   const spans = await fetchSpans();
   const allItems = spans?.items ?? [];
@@ -321,18 +347,45 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
   // the active span ID changes for the same event we must adopt the existing
   // row instead of inserting a duplicate. Identity = start epoch + type.
   const adoptedIds = new Set<number>();
+  // Adoption rules for rows that represent the same physical event under a
+  // different span id:
+  // 1. Express convergence: the express/history row and the live capture can
+  //    describe the same event under different span ids (e.g. express
+  //    "span.downtime.planned" vs live "job.work.downtime.named"). The express
+  //    row survives sync-spans-history (its dedupe only removes source='live'
+  //    rows), so we converge on it: adopt it and delete the superseded live
+  //    row. That keeps a single row per event and preserves its alert flags —
+  //    otherwise the live row keeps getting deleted/re-inserted, resetting
+  //    created_at and alert_sent so the occurred alert re-fires every run.
+  // 2. Identity = start epoch + type (OFS reports drifted starts / changed
+  //    span ids for the same event over its life).
   for (const span of current) {
     const type = eventTypeOf(span);
     if (!type) continue;
-    const identityMatch = openEvents.find(
-      (e) => e.id !== span.id && startsMatch(e.start_epoch, span.start) && e.downtime_type === type,
+    const spanReason = span.$reason?.description ?? null;
+    const expressMatch = openEvents.find(
+      (e) =>
+        e.id !== span.id &&
+        e.source === "history" &&
+        e.downtime_type === type &&
+        (startsMatch(e.start_epoch, span.start) ||
+          (spanReason && e.reason === spanReason)) &&
+        windowsOverlap(e.start_epoch, e.end_epoch, span.start, null),
     );
-    if (identityMatch) adoptedIds.add(identityMatch.id);
+    const match = expressMatch ??
+      openEvents.find(
+        (e) => e.id !== span.id && startsMatch(e.start_epoch, span.start) && e.downtime_type === type,
+      );
+    if (match) adoptedIds.add(match.id);
   }
 
   // Resolve any open events that are no longer in the live feed (and were not
-  // adopted by a span-id drift above).
-  const stale = openEvents.filter((e) => !currentIds.has(e.id) && !adoptedIds.has(e.id));
+  // adopted by a span-id drift above). Rows written by sync-spans-history
+  // (source='history') are owned by that function — it resolves them once OFS
+  // express history reports an end — so we leave them alone.
+  const stale = openEvents.filter(
+    (e) => !currentIds.has(e.id) && !adoptedIds.has(e.id) && e.source !== "history",
+  );
   const now = Date.now();
   for (const evt of stale) {
     await supabase
@@ -362,13 +415,34 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
   let insertedAny = false;
 
   for (const span of current) {
+    const type = eventTypeOf(span);
+    const spanReason = span.$reason?.description ?? null;
     let existing = openEvents.find((e) => e.id === span.id);
     let adopting = false;
-    if (!existing) {
-      const type = eventTypeOf(span);
-      if (type) {
+    let liveDuplicate: DowntimeEvent | null = null;
+
+    if (type) {
+      // Prefer the express/history row for the same physical event (it survives
+      // sync-spans-history, which never removes source='history' rows). Adopt it
+      // and drop our own same-event live row so there is exactly one row per
+      // event — deleting the live row alone would just have it re-inserted,
+      // resetting its alert flags and re-firing the occurred alert.
+      const expressRow = openEvents.find(
+        (e) =>
+          e.id !== span.id &&
+          e.source === "history" &&
+          e.downtime_type === type &&
+          (startsMatch(e.start_epoch, span.start) ||
+            (spanReason && e.reason === spanReason)) &&
+          windowsOverlap(e.start_epoch, e.end_epoch, span.start, null),
+      );
+      if (expressRow) {
+        if (existing && existing.id !== expressRow.id) liveDuplicate = existing;
+        existing = expressRow;
+        adopting = true;
+      } else if (!existing) {
         const identityMatch = openEvents.find(
-          (e) => startsMatch(e.start_epoch, span.start) && e.downtime_type === type,
+          (e) => e.id !== span.id && startsMatch(e.start_epoch, span.start) && e.downtime_type === type,
         );
         if (identityMatch) {
           existing = identityMatch;
@@ -402,19 +476,39 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
         metadata: mergedMetadata,
       };
       if (needsUpdate) {
+        const patch: Record<string, unknown> = {
+          span_id: span.id ?? null,
+          state: span.state ?? null,
+          category: merged.category,
+          reason: merged.reason,
+          downtime_type: merged.downtime_type,
+          duration_ms: merged.duration_ms,
+          metadata: merged.metadata,
+          updated_at: new Date().toISOString(),
+        };
+        if (liveDuplicate) {
+          // Migrate alert state from the superseded live row to the express row
+          // so the occurred/resolved notifications don't re-fire.
+          merged.alert_sent = liveDuplicate.alert_sent ?? merged.alert_sent ?? false;
+          merged.resolved_alert_sent =
+            liveDuplicate.resolved_alert_sent ?? merged.resolved_alert_sent ?? false;
+          merged.last_escalation_minutes =
+            liveDuplicate.last_escalation_minutes ?? merged.last_escalation_minutes ?? null;
+          patch.alert_sent = merged.alert_sent;
+          patch.resolved_alert_sent = merged.resolved_alert_sent;
+          patch.last_escalation_minutes = merged.last_escalation_minutes;
+        }
         await supabase
           .from("downtime_events")
-          .update({
-            span_id: span.id ?? null,
-            state: span.state ?? null,
-            category: merged.category,
-            reason: merged.reason,
-            downtime_type: merged.downtime_type,
-            duration_ms: merged.duration_ms,
-            metadata: merged.metadata,
-            updated_at: new Date().toISOString(),
-          })
+          .update(patch)
           .eq("id", existing.id);
+      }
+      if (liveDuplicate) {
+        const { error } = await supabase
+          .from("downtime_events")
+          .delete()
+          .eq("id", liveDuplicate.id);
+        if (error) throw new Error(error.message);
       }
       liveEvents.push(merged);
       continue;

@@ -460,6 +460,30 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
     const liveDuration = span.duration ?? 0;
 
     if (existing) {
+      // OFS freezes a span's duration once it ends but may keep the span in
+      // the live feed until a newer span replaces it. A duration that is
+      // unchanged between polls (ms precision, ~5 min apart) means the event
+      // has ended — lock the row now with OFS's exact duration instead of
+      // waiting for the span to leave the feed (which could otherwise keep
+      // growing the duration on an ended span and inflate our record).
+      if (
+        !existing.resolved &&
+        existing.duration_ms != null &&
+        existing.duration_ms > 0 &&
+        liveDuration === existing.duration_ms
+      ) {
+        await supabase
+          .from("downtime_events")
+          .update({
+            resolved: true,
+            end_epoch: evt.start_epoch + liveDuration,
+            duration_ms: liveDuration,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id);
+        continue;
+      }
+
       const liveEvt = spanToEvent(span, allItems);
       const liveMetadata = (liveEvt.metadata ?? {}) as Record<string, unknown>;
       const mergedMetadata: Record<string, unknown> = {

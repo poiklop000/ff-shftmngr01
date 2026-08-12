@@ -10,6 +10,7 @@ import {
   Timer,
 } from 'lucide-react';
 import {
+  clipEventToShift,
   fetchDowntimeByDate,
   formatDuration,
   formatEventDate,
@@ -18,7 +19,7 @@ import {
   type DowntimeComment,
   type DowntimeEvent,
 } from '@/lib/downtime';
-import { filterByShiftWindow, getActiveHours, SHIFT_LABELS, type Shift } from '@/types';
+import { filterByShiftWindow, getActiveHours, getShiftWindowMinutes, SHIFT_LABELS, type Shift } from '@/types';
 import { PageHelp } from '@/components/PageHelp';
 import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
 import { CheckboxDropdown } from '@/components/CheckboxDropdown';
@@ -122,7 +123,19 @@ export function DowntimeHistory({
     return list;
   }, [shiftEvents, typeFilters, textFilter]);
 
-  const totalDowntimeMs = filteredEvents.reduce((sum, e) => sum + (e.duration_ms ?? 0), 0);
+  const shiftWindow = useMemo(
+    () => getShiftWindowMinutes(currentShift, customHours),
+    [currentShift, customHours],
+  );
+
+  const clippedDowntime = useMemo(() => {
+    if (shiftWindow.endMin <= shiftWindow.startMin) return [];
+    return filteredEvents
+      .map((evt) => ({ evt, clip: clipEventToShift(evt, shiftWindow.startMin, shiftWindow.endMin, activeDate) }))
+      .filter((x): x is { evt: DowntimeEvent; clip: NonNullable<ReturnType<typeof clipEventToShift>> } => x.clip != null);
+  }, [filteredEvents, shiftWindow, activeDate]);
+
+  const totalDowntimeMs = clippedDowntime.reduce((sum, x) => sum + x.clip.durationMs, 0);
   const resolvedCount = filteredEvents.filter((e) => e.resolved).length;
 
   const dateLabel = activeDate === todayStr() ? "Today's" : activeDate;
@@ -153,6 +166,7 @@ export function DowntimeHistory({
             title: "Reading the event table",
             items: [
               "Each row is one downtime event, showing start time, category, reason, type (unplanned, planned, or setup), crew, duration, and status (Ongoing or Resolved).",
+              "If an event crosses a shift boundary it shows a * next to its duration — the start time and duration shown are only the portion that fell within this shift, so each shift is charged for its own share.",
               "If an event has operator comments, a speech-bubble icon appears next to it. Click the row to expand and read the comments.",
               "Click the row again to collapse the comments.",
             ],
@@ -275,7 +289,7 @@ export function DowntimeHistory({
                 </tr>
               </thead>
               <tbody>
-                {filteredEvents.map((evt) => {
+                {clippedDowntime.map(({ evt, clip }) => {
                   const hasComments = evt.comments && evt.comments.length > 0;
                   const isExpanded = expandedRow === evt.id;
                   return (
@@ -291,8 +305,8 @@ export function DowntimeHistory({
                               <MessageSquare size={12} className="text-brand-600 shrink-0" />
                             )}
                             <div>
-                              <div>{formatEventTime(evt.start_epoch)}</div>
-                              <div className="text-[11px] text-slate-400">{formatEventDate(evt.start_epoch)}</div>
+                              <div>{formatEventTime(clip.startEpoch)}</div>
+                              <div className="text-[11px] text-slate-400">{formatEventDate(clip.startEpoch)}</div>
                             </div>
                           </div>
                         </td>
@@ -305,7 +319,15 @@ export function DowntimeHistory({
                           {evt.crew_name ?? <span className="text-slate-300">—</span>}
                         </td>
                         <td className="px-4 py-3 text-right font-bold text-slate-700 whitespace-nowrap">
-                          {formatDuration(evt.duration_ms ?? 0)}
+                          {formatDuration(clip.durationMs)}
+                          {clip.partial && (
+                            <span
+                              title="Event crossed a shift boundary — only this shift's portion is counted."
+                              className="ml-1 text-slate-400 font-semibold"
+                            >
+                              *
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-center">
                           {evt.resolved ? (

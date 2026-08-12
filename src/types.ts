@@ -467,6 +467,14 @@ export function computeDowntimeLogs(
  * overlap into the window — a planned stop that began at 04:54 must keep
  * showing after the 06:00 shift change instead of disappearing.
  */
+export function getShiftWindowMinutes(shift: Shift, customHours: string[]): { startMin: number; endMin: number } {
+  const hours = getActiveHours(shift, customHours);
+  if (hours.length === 0) return { startMin: 0, endMin: 0 };
+  const shiftStartMin = timeStrToMinutes(hours[0]!.split(' - ')[0]!.trim());
+  const lastHourStr = hours[hours.length - 1]!.split(' - ')[1]!.trim();
+  return { startMin: shiftStartMin, endMin: shiftTimeToMinutes(lastHourStr, shiftStartMin) };
+}
+
 export function filterByShiftWindow<T>(
   entries: T[],
   shift: Shift,
@@ -478,10 +486,7 @@ export function filterByShiftWindow<T>(
 ): T[] {
   const hours = getActiveHours(shift, customHours);
   if (hours.length === 0 || !shiftDate) return [];
-  const shiftStartStr = hours[0]!.split(' - ')[0]!.trim();
-  const shiftStartMin = timeStrToMinutes(shiftStartStr);
-  const lastHourStr = hours[hours.length - 1]!.split(' - ')[1]!.trim();
-  const shiftEndMin = shiftTimeToMinutes(lastHourStr, shiftStartMin);
+  const { startMin: shiftStartMin, endMin: shiftEndMin } = getShiftWindowMinutes(shift, customHours);
 
   return entries.filter((e) => {
     const consoleTime = consoleTimeKey(e);

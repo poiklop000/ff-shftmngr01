@@ -161,50 +161,6 @@ export function downtimeEventEndText(e: DowntimeEvent): string | null {
   return formatEpochConsole(e.end_epoch);
 }
 
-export interface ShiftClip {
-  startEpoch: number;
-  endEpoch: number;
-  durationMs: number;
-  partial: boolean;
-}
-
-/**
- * Clips a downtime event to the portion that falls within a shift window,
- * so each shift sees (and is counted for) only its own share of an event
- * that crosses a shift boundary. The window is expressed as minutes since
- * the shift date's midnight in OFS console time; the clip uses the event's
- * real epochs so it stays timezone-independent.
- *
- * Unresolved (still ongoing) events are counted only up to the current time
- * (or the shift end, whichever comes first), matching how the live timeline
- * treats the in-progress shift — never the full shift ahead of now.
- */
-export function clipEventToShift(
-  evt: DowntimeEvent,
-  shiftStartMin: number,
-  shiftEndMin: number,
-  shiftDate: string,
-): ShiftClip | null {
-  const start = evt.start_epoch;
-  const range = dateToEpochRange(shiftDate);
-  const shiftStartEpoch = range.start + shiftStartMin * 60_000;
-  const shiftEndEpoch = range.start + shiftEndMin * 60_000;
-  const end =
-    evt.resolved && evt.end_epoch != null
-      ? evt.end_epoch
-      : Math.min(shiftEndEpoch, Date.now());
-  const clippedStart = Math.max(start, shiftStartEpoch);
-  const clippedEnd = Math.min(end, shiftEndEpoch);
-  const durationMs = clippedEnd - clippedStart;
-  if (durationMs <= 0) return null;
-  return {
-    startEpoch: clippedStart,
-    endEpoch: clippedEnd,
-    durationMs,
-    partial: clippedStart > start || clippedEnd < end || !evt.resolved,
-  };
-}
-
 // Convert a date string (YYYY-MM-DD) to the start/end epoch range in the
 // OFS console timezone (Pacific/Auckland). We build the bounds from the
 // date string directly and convert to epoch via Intl, so the browser's

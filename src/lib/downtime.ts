@@ -175,8 +175,9 @@ export interface ShiftClip {
  * the shift date's midnight in OFS console time; the clip uses the event's
  * real epochs so it stays timezone-independent.
  *
- * Unresolved (still ongoing) events are counted up to the shift end, which
- * matches how ended shifts are handled on the live timeline.
+ * Unresolved (still ongoing) events are counted only up to the current time
+ * (or the shift end, whichever comes first), matching how the live timeline
+ * treats the in-progress shift — never the full shift ahead of now.
  */
 export function clipEventToShift(
   evt: DowntimeEvent,
@@ -188,7 +189,10 @@ export function clipEventToShift(
   const range = dateToEpochRange(shiftDate);
   const shiftStartEpoch = range.start + shiftStartMin * 60_000;
   const shiftEndEpoch = range.start + shiftEndMin * 60_000;
-  const end = evt.resolved && evt.end_epoch != null ? evt.end_epoch : shiftEndEpoch;
+  const end =
+    evt.resolved && evt.end_epoch != null
+      ? evt.end_epoch
+      : Math.min(shiftEndEpoch, Date.now());
   const clippedStart = Math.max(start, shiftStartEpoch);
   const clippedEnd = Math.min(end, shiftEndEpoch);
   const durationMs = clippedEnd - clippedStart;

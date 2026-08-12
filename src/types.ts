@@ -385,7 +385,7 @@ export function computeDowntimeLogs(
   const lastHourStr = hours[hours.length - 1]!.split(' - ')[1]!.trim();
   const shiftEndMin = shiftTimeToMinutes(lastHourStr, shiftStartMin);
 
-  const buckets: Record<number, Array<{ label: string; startMin: number; comments: string[] }>> = {};
+  const buckets: Record<number, Array<{ label: string; startMin: number; durationMin: number; comments: string[] }>> = {};
 
   for (const evt of events) {
     if (!evt.startText) continue;
@@ -404,6 +404,7 @@ export function computeDowntimeLogs(
       continue;
     }
 
+    const durationMin = endMin - startMin;
     const category = evt.category?.trim();
     const reason = evt.reason?.trim() || 'Downtime';
     const label = category ? `${category} - ${reason}` : reason;
@@ -419,25 +420,27 @@ export function computeDowntimeLogs(
       // overlap check
       if (startMin < iEndMin && endMin > iStartMin) {
         if (!buckets[i]) buckets[i] = [];
-        buckets[i].push({ label, startMin, comments: operatorComments });
+        buckets[i].push({ label, startMin, durationMin, comments: operatorComments });
       }
     });
   }
 
   for (const [i, entries] of Object.entries(buckets)) {
-    entries.sort((a, b) => a.startMin - b.startMin);
+    // Longest downtime first so the biggest hits show at the top of the cell.
+    entries.sort((a, b) => b.durationMin - a.durationMin);
     // Combine events with the same category + reason into one line with an
     // occurrence count, and merge all operator comments from those occurrences
     // on the line below.
-    const groups = new Map<string, { label: string; count: number; comments: string[]; startMin: number }>();
-    for (const { label, startMin, comments } of entries) {
-      const g = groups.get(label) ?? { label, count: 0, comments: [], startMin };
+    const groups = new Map<string, { label: string; count: number; comments: string[]; startMin: number; durationMin: number }>();
+    for (const { label, durationMin, comments } of entries) {
+      const g = groups.get(label) ?? { label, count: 0, comments: [], startMin: 0, durationMin };
       g.count += 1;
+      if (durationMin > g.durationMin) g.durationMin = durationMin;
       if (comments) g.comments.push(...comments);
       groups.set(label, g);
     }
     result[Number(i)] = Array.from(groups.values())
-      .sort((a, b) => a.startMin - b.startMin)
+      .sort((a, b) => b.durationMin - a.durationMin)
       .map((g) => {
         const countLabel = g.count > 1 ? `${g.label} (${g.count}x)` : g.label;
         const uniqueComments = Array.from(new Set(g.comments));

@@ -388,12 +388,19 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
   );
   const now = Date.now();
   for (const evt of stale) {
+    // Use OFS's last-reported span duration (updated every poll while the
+    // event was live) rather than the poll timestamp. Recomputing
+    // `now - start` at close overstates the duration by however long we took
+    // to notice the event left the live feed (up to one poll interval), while
+    // OFS keeps its own exact span duration (e.g. a setup frozen at its true
+    // end). Fall back to `now - start` only if we never captured a duration.
+    const durationMs = evt.duration_ms && evt.duration_ms > 0 ? evt.duration_ms : now - evt.start_epoch;
     await supabase
       .from("downtime_events")
       .update({
         resolved: true,
-        end_epoch: now,
-        duration_ms: now - evt.start_epoch,
+        end_epoch: evt.start_epoch + durationMs,
+        duration_ms: durationMs,
         updated_at: new Date().toISOString(),
       })
       .eq("id", evt.id);

@@ -27,6 +27,7 @@ export interface DowntimeEvent {
   end_epoch: number | null;
   duration_ms: number | null;
   resolved: boolean;
+  user_edited: boolean;
   span_class: string | null;
   span_type: string | null;
   reason_id: number | null;
@@ -126,6 +127,7 @@ function spanToEvent(span: ExpressSpan): DowntimeEvent {
     end_epoch: resolved ? end : null,
     duration_ms: duration,
     resolved,
+    user_edited: false,
     span_class: span.spanClass ?? null,
     span_type: span.spanType ?? null,
     reason_id: span.reasonId ?? null,
@@ -193,15 +195,15 @@ function dateToEpochRange(dateStr: string): { start: number; end: number } {
   return { start: aucklandMidnightEpoch, end: aucklandEndOfDayEpoch };
 }
 
-// Convert a factory-local wall clock time ("YYYY-MM-DDTHH:mm", Pacific/Auckland)
+// Convert a factory-local wall clock time ("YYYY-MM-DDTHH:mm[:ss]", Pacific/Auckland)
 // to its UTC epoch in ms. Handles the timezone offset via Intl, so the browser's
 // own timezone does not shift the result.
 export function localDateTimeToEpoch(dt: string): number {
-  const [datePart, timePart = '00:00'] = dt.split('T');
+  const [datePart, timePart = '00:00'] = dt.split(/[T ]/);
   if (!datePart) return NaN;
   const [y, m, d] = datePart.split('-').map(Number);
-  const [hh, mm] = timePart.split(':').map(Number);
-  const naiveUtc = Date.UTC(y, m - 1, d, hh || 0, mm || 0, 0);
+  const [hh, mm, ss] = timePart.split(':').map(Number);
+  const naiveUtc = Date.UTC(y, m - 1, d, hh || 0, mm || 0, ss || 0);
   if (Number.isNaN(naiveUtc)) return NaN;
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Pacific/Auckland',
@@ -214,7 +216,7 @@ export function localDateTimeToEpoch(dt: string): number {
   const wallD = Number(get('day'));
   const wallH = get('hour') === '24' ? 0 : Number(get('hour'));
   const wallMin = Number(get('minute'));
-  const aucklandAsUtc = Date.UTC(wallY, wallM - 1, wallD, wallH, wallMin, 0);
+  const aucklandAsUtc = Date.UTC(wallY, wallM - 1, wallD, wallH, wallMin, ss || 0);
   const offsetMin = (aucklandAsUtc - naiveUtc) / 60000;
   return naiveUtc - offsetMin * 60000;
 }
@@ -341,6 +343,7 @@ async function fetchDbEventsInEpochRange(
     end_epoch: row.end_epoch,
     duration_ms: row.duration_ms,
     resolved: row.resolved,
+    user_edited: row.user_edited === true,
     span_class: row.span_class,
     span_type: row.span_type,
     reason_id: row.reason_id,
@@ -366,7 +369,9 @@ async function fetchDbEventsInEpochRange(
 
 export function formatDuration(ms: number): string {
   if (!ms || ms <= 0) return '00:00:00';
-  const totalSec = Math.floor(ms / 1000);
+  // Round to the nearest second so fractional-ms OFS durations display the
+  // same number OFS itself shows (e.g. 48:59.865 -> 00:49:00).
+  const totalSec = Math.round(ms / 1000);
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
@@ -378,6 +383,7 @@ export function formatEventTime(epochMs: number): string {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
+    hour12: false,
   });
 }
 
@@ -387,4 +393,131 @@ export function formatEventDate(epochMs: number): string {
     month: 'short',
     year: 'numeric',
   });
+}
+
+// True only for events whose duration/end a user may correct: the two
+// live-captured types whose OFS live-feed duration can differ from OFS's true
+// figure. Downtime (planned/unplanned) matches OFS exactly via express history.
+export function isUserEditableEvent(e: { downtime_type: string | null }): boolean {
+  const t = e.downtime_type?.toUpperCase();
+  return t === 'SETUP' || t === 'RUNNING_SLOW';
+}
+
+// Formats an epoch as an Auckland wall-clock value for a <input type="datetime-local">.
+export function epochToLocalInputValue(epochMs: number): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Pacific/Auckland',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).formatToParts(new Date(epochMs));
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00';
+  const hour = get('hour') === '24' ? '00' : get('hour');
+  return `${get('year')}-${get('month')}-${get('day')}T${hour}:${get('minute')}:${get('second')}`;
+}
+
+// Formats an epoch as Auckland wall-clock "YYYY-MM-DD HH:MM:SS" (24h military time),
+// for the free-text end-time field in the correction modal.
+export function epochToLocalMilitaryText(epochMs: number): string {
+  return epochToLocalInputValue(epochMs).replace('T', ' ');
+}
+
+// Parses a user-entered duration into milliseconds. Accepts "HH:MM:SS",
+// "MM:SS", "H:MM", a bare number of minutes, or "Xm Ys". Returns null when the
+// text cannot be interpreted.
+export function parseDurationInput(text: string): number | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  const hmTime = trimmed.match(/^(\d+):([0-5]?\d)(?::([0-5]?\d))?$/);
+  if (hmTime) {
+    const h = Number(hmTime[1]);
+    const m = Number(hmTime[2]);
+    const s = Number(hmTime[3] ?? 0);
+    if (m > 59 || s > 59) return null;
+    return (h * 3600 + m * 60 + s) * 1000;
+  }
+
+  const minutes = Number(trimmed.replace(',', '.'));
+  if (Number.isFinite(minutes) && minutes >= 0) {
+    return Math.round(minutes * 60000);
+  }
+
+  return null;
+}
+
+interface DowntimeEditMetadata {
+  duration_ms?: number | null;
+  end_epoch?: number | null;
+}
+
+/**
+ * Saves a user correction (duration + end time) for a setup/running-slow event.
+ * Marks the row `user_edited` so capture-downtime and sync-spans-history leave
+ * it alone, and stashes the pre-edit values in `metadata.userEdit` so the user
+ * can reset back to the OFS-captured figures later.
+ */
+export async function correctDowntimeEvent(
+  id: number,
+  durationMs: number,
+  endEpoch: number,
+): Promise<void> {
+  const { data: row, error: fetchErr } = await supabase
+    .from('downtime_events')
+    .select('metadata, duration_ms, end_epoch')
+    .eq('id', id)
+    .maybeSingle();
+  if (fetchErr) throw new Error(fetchErr.message);
+  if (!row) throw new Error('Downtime event not found.');
+
+  const metadata = (row.metadata ?? {}) as Record<string, unknown>;
+  const storedEdit = (metadata.userEdit ?? {}) as DowntimeEditMetadata;
+
+  const { error } = await supabase
+    .from('downtime_events')
+    .update({
+      duration_ms: durationMs,
+      end_epoch: endEpoch,
+      resolved: true,
+      user_edited: true,
+      metadata: {
+        ...metadata,
+        userEdit: {
+          duration_ms: storedEdit.duration_ms ?? row.duration_ms ?? null,
+          end_epoch: storedEdit.end_epoch ?? row.end_epoch ?? null,
+        },
+      },
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+/**
+ * Removes a user correction, restoring the OFS-captured duration/end stored at
+ * edit time (if any) and unlocking the row so automated capture manages it again.
+ */
+export async function resetDowntimeEvent(id: number): Promise<void> {
+  const { data: row, error: fetchErr } = await supabase
+    .from('downtime_events')
+    .select('metadata')
+    .eq('id', id)
+    .maybeSingle();
+  if (fetchErr) throw new Error(fetchErr.message);
+  if (!row) throw new Error('Downtime event not found.');
+
+  const metadata = (row.metadata ?? {}) as Record<string, unknown>;
+  const storedEdit = (metadata.userEdit ?? {}) as DowntimeEditMetadata;
+  const patch: Record<string, unknown> = {
+    user_edited: false,
+    updated_at: new Date().toISOString(),
+  };
+  if (storedEdit.duration_ms != null) patch.duration_ms = storedEdit.duration_ms;
+  if (storedEdit.end_epoch != null) patch.end_epoch = storedEdit.end_epoch;
+
+  const { ...rest } = metadata;
+  delete (rest as Record<string, unknown>).userEdit;
+  patch.metadata = rest;
+
+  const { error } = await supabase.from('downtime_events').update(patch).eq('id', id);
+  if (error) throw new Error(error.message);
 }

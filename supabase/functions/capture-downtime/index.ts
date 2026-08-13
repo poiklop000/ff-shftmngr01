@@ -71,6 +71,7 @@ interface DowntimeEvent {
   end_epoch: number | null;
   duration_ms: number | null;
   resolved: boolean;
+  user_edited?: boolean;
   counts: Record<string, number> | null;
   metadata: Record<string, unknown> | null;
   created_at: string;
@@ -338,7 +339,25 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
     .select("*")
     .eq("console_id", CONSOLE)
     .eq("resolved", false);
-  const openEvents = (openRows ?? []) as unknown as DowntimeEvent[];
+  const openEvents = ((openRows ?? []) as unknown as DowntimeEvent[]).filter((e) => !e.user_edited);
+
+  // User-corrected rows (duration/end edited in the app) are off-limits: never
+  // resolve, update, adopt, or delete them, and never re-insert a span that
+  // matches one — the upsert below would clobber the correction.
+  const { data: editedRows } = await supabase
+    .from("downtime_events")
+    .select("id, start_epoch, downtime_type")
+    .eq("console_id", CONSOLE)
+    .eq("user_edited", true);
+  const userEdited = (editedRows ?? []) as Array<{
+    id: number;
+    start_epoch: number;
+    downtime_type: string | null;
+  }>;
+  const userEditedIds = new Set(userEdited.map((r) => r.id));
+  const userEditedKeys = new Set(
+    userEdited.map((r) => `${r.start_epoch}_${r.downtime_type}`),
+  );
 
   // OFS represents a single event with several overlapping spans that share a
   // start time but carry different span IDs over the event's life (e.g.
@@ -424,6 +443,14 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
   for (const span of current) {
     const type = eventTypeOf(span);
     const spanReason = span.$reason?.description ?? null;
+    if (
+      (span.id != null && userEditedIds.has(span.id)) ||
+      (type != null && span.start != null && userEditedKeys.has(`${span.start}_${type}`))
+    ) {
+      // A user corrected this event's duration/end in the app. Keep the
+      // correction instead of re-tracking it from the live feed.
+      continue;
+    }
     let existing = openEvents.find((e) => e.id === span.id);
     let adopting = false;
     let liveDuplicate: DowntimeEvent | null = null;

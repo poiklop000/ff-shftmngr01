@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   Calendar,
+  Check,
   History,
   Loader2,
   MessageSquare,
@@ -21,6 +22,7 @@ import {
 import { filterByShiftWindow, getActiveHours, SHIFT_LABELS, type Shift } from '@/types';
 import { PageHelp } from '@/components/PageHelp';
 import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
+import { DowntimeEventEdit } from '@/components/DowntimeEventEdit';
 import { CheckboxDropdown } from '@/components/CheckboxDropdown';
 
 function todayStr(): string {
@@ -272,6 +274,7 @@ export function DowntimeHistory({
                   <th className="px-4 py-2.5 hidden sm:table-cell">Crew</th>
                   <th className="px-4 py-2.5 text-right">Duration</th>
                   <th className="px-4 py-2.5 text-center">Status</th>
+                  <th className="px-4 py-2.5 text-center">Edit</th>
                 </tr>
               </thead>
               <tbody>
@@ -305,7 +308,17 @@ export function DowntimeHistory({
                           {evt.crew_name ?? <span className="text-slate-300">—</span>}
                         </td>
                         <td className="px-4 py-3 text-right font-bold text-slate-700 whitespace-nowrap">
-                          {formatDuration(evt.duration_ms ?? 0)}
+                          <span className="inline-flex items-center gap-1.5">
+                            {formatDuration(evt.duration_ms ?? 0)}
+                            {evt.user_edited && (
+                              <span
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-brand-100 text-brand-800 text-[10px] font-bold"
+                                title="Duration corrected manually"
+                              >
+                                <Check size={10} /> Edited
+                              </span>
+                            )}
+                          </span>
                         </td>
                         <td className="px-4 py-3 text-center">
                           {evt.resolved ? (
@@ -319,10 +332,13 @@ export function DowntimeHistory({
                             </span>
                           )}
                         </td>
+                        <td className="px-4 py-3 text-center">
+                          <DowntimeEventEdit event={evt} onSaved={() => loadHistory(activeDate)} />
+                        </td>
                       </tr>
                       {isExpanded && hasComments && (
                         <tr className="border-b border-slate-100 bg-slate-50/50">
-                          <td colSpan={7} className="px-4 py-3">
+                          <td colSpan={8} className="px-4 py-3">
                             <CommentList comments={evt.comments!} />
                           </td>
                         </tr>

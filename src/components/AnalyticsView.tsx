@@ -3,6 +3,7 @@ import { BarChart3, Loader2, FileDown, RefreshCw, Calendar, Clock, MessageSquare
 import { PageHelp } from '@/components/PageHelp';
 import { CheckboxDropdown } from '@/components/CheckboxDropdown';
 import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
+import { DowntimeEventEdit } from '@/components/DowntimeEventEdit';
 import { fetchDowntimeBetween, formatDuration, localDateTimeToEpoch, type DowntimeComment, type DowntimeEvent } from '@/lib/downtime';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
 import {
@@ -901,6 +902,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
                       <th className="px-4 py-2.5">Reason</th>
                       <th className="px-4 py-2.5">Crew</th>
                       <th className="px-4 py-2.5">Status</th>
+                      <th className="px-4 py-2.5 text-center">Edit</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -923,7 +925,19 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
                                 {eventStartLabel(e)}
                               </div>
                             </td>
-                            <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{eventDuration(e)}</td>
+                            <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
+                              <span className="inline-flex items-center gap-1.5">
+                                {eventDuration(e)}
+                                {e.user_edited && (
+                                  <span
+                                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-brand-100 text-brand-800 text-[10px] font-bold"
+                                    title="Duration corrected manually"
+                                  >
+                                    <Check size={10} /> Edited
+                                  </span>
+                                )}
+                              </span>
+                            </td>
                             <td className="px-4 py-3">
                               <DowntimeTypeBadge type={e.downtime_type} />
                             </td>
@@ -935,10 +949,13 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
                                 {e.resolved ? 'Resolved' : 'Ongoing'}
                               </span>
                             </td>
+                            <td className="px-4 py-3 text-center">
+                              <DowntimeEventEdit event={e} onSaved={() => loadData(startAt, endAt)} />
+                            </td>
                           </tr>
                           {isExpanded && hasComments && (
                             <tr className="border-b border-slate-100 bg-slate-50/50">
-                              <td colSpan={7} className="px-4 py-3">
+                              <td colSpan={8} className="px-4 py-3">
                                 <CommentList comments={e.comments!} />
                               </td>
                             </tr>

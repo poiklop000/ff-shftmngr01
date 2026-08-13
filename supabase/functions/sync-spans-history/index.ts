@@ -458,12 +458,30 @@ Deno.serve(async (req: Request) => {
       .from("downtime_events")
       .select("id, start_epoch, downtime_type")
       .in("downtime_type", ["SETUP", "RUNNING_SLOW"])
-      .eq("resolved", false);
+      .eq("resolved", false)
+      .eq("user_edited", false);
     const openLive = (openLiveRows ?? []) as Array<{
       id: number;
       start_epoch: number;
       downtime_type: string | null;
     }>;
+
+    // User-corrected setup/slow rows are off-limits: never resolve, adopt,
+    // supersede, delete, or re-upsert a span that matches one.
+    const { data: editedLiveRows } = await supabase
+      .from("downtime_events")
+      .select("id, start_epoch, downtime_type")
+      .in("downtime_type", ["SETUP", "RUNNING_SLOW"])
+      .eq("user_edited", true);
+    const editedLive = (editedLiveRows ?? []) as Array<{
+      id: number;
+      start_epoch: number;
+      downtime_type: string | null;
+    }>;
+    const userEditedIds = new Set(editedLive.map((r) => r.id));
+    const userEditedKeys = new Set(
+      editedLive.map((r) => `${r.start_epoch}_${r.downtime_type}`),
+    );
 
     const adoptedIds = new Set<number>();
     for (const s of liveStateSpans) {
@@ -504,7 +522,8 @@ Deno.serve(async (req: Request) => {
     const { data: existingLiveRows } = await supabase
       .from("downtime_events")
       .select("id, start_epoch, end_epoch, downtime_type, reason, source")
-      .eq("source", "live");
+      .eq("source", "live")
+      .eq("user_edited", false);
     const liveRows = (existingLiveRows ?? []) as Array<{
       id: number;
       start_epoch: number;
@@ -549,6 +568,13 @@ Deno.serve(async (req: Request) => {
     // row when OFS changed span ID for the same event instead of inserting a
     // duplicate. Express span IDs never collide with setup/slow IDs.
     for (const rec of liveRecords) {
+      if (
+        (rec.id != null && userEditedIds.has(rec.id)) ||
+        userEditedKeys.has(`${rec.start_epoch}_${rec.downtime_type}`)
+      ) {
+        // A user corrected this event's duration/end in the app — keep it.
+        continue;
+      }
       const match = openLive.find(
         (e) => e.id !== rec.id && e.start_epoch === rec.start_epoch && e.downtime_type === rec.downtime_type,
       );

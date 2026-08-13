@@ -160,6 +160,22 @@ function windowsOverlap(
   return aStart <= bEndAt && bStart <= aEndAt;
 }
 
+// True when two rows describe the same physical downtime. OFS can surface one
+// event as multiple overlapping spans — the express/history span and the
+// live-feed span often carry different ids, slightly drifted starts and, until
+// a user classifies the event, different types and reasons (e.g.
+// UNPLANNED/Unallocated vs SETUP/Setup). Rows are the same event when their
+// windows overlap AND either their starts are within a few minutes (capture /
+// sync drift) or they share a specific reason (a span named once the reason is
+// assigned can start well after the unclassified span it describes).
+function samePhysicalEvent(a: DowntimeRow, b: DowntimeRow): boolean {
+  if (!windowsOverlap(a.start_epoch, a.end_epoch, b.start_epoch, b.end_epoch)) return false;
+  if (Math.abs(a.start_epoch - b.start_epoch) <= 10 * 60_000) return true;
+  const aReason = a.reason && a.reason !== "Unallocated" ? a.reason : null;
+  const bReason = b.reason && b.reason !== "Unallocated" ? b.reason : null;
+  return !!aReason && aReason === bReason;
+}
+
 interface JobContext {
   product: string | null;
   orderName: string | null;
@@ -674,60 +690,32 @@ Deno.serve(async (req: Request) => {
       return json({ ok: true, alerted: 0 });
     }
 
-    // The same physical downtime can exist as both a source='live' row (written
-    // by capture-downtime) and a source='history' row (written by
-    // sync-spans-history) with slightly drifted start epochs. Alerting on both
-    // produces duplicate alert chains. Group candidates by downtime type + fuzzy
-    // start (within a minute) and keep the most authoritative row per group:
-    // prefer the express/history row, then the row with a specific reason
-    // (over the generic "Unallocated"), then the earlier one.
-    //
-    // The live and express starts can also drift by far more than a minute —
-    // e.g. the live "job.work.downtime.named" span starts when the reason is
-    // assigned, well after the express "span.downtime.planned" span. Rows that
-    // share a downtime type, a specific reason and an overlapping window are
-    // merged into the same group too, otherwise a single event fires a
-    // duplicate alert chain.
-    const grouped = new Map<string, DowntimeRow[]>();
+    // The same physical downtime can surface as several rows: the live-feed
+    // span (written by capture-downtime) and the express/history span (written
+    // by sync-spans-history) can carry different span ids, slightly drifted
+    // start epochs and — until an OFS user classifies the event — different
+    // downtime types and reasons (e.g. UNPLANNED/Unallocated vs SETUP/Setup).
+    // Alerting on every row produces duplicate alert chains, so rows that
+    // describe the same physical event (overlapping windows, type-agnostic)
+    // are merged into one group.
+    const grouped: DowntimeRow[][] = [];
     for (const evt of events) {
-      const type = (evt.downtime_type ?? "").toUpperCase() || "UNKNOWN";
       let placed = false;
-      for (const [key, rows] of grouped) {
-        const [kType, kStart] = key.split("|");
-        if (kType === type && Math.abs(Number(kStart) - evt.start_epoch) <= 60_000) {
+      for (const rows of grouped) {
+        if (rows.some((r) => samePhysicalEvent(evt, r))) {
           rows.push(evt);
           placed = true;
           break;
         }
       }
-      if (!placed) {
-        const specificReason = evt.reason && evt.reason !== "Unallocated" ? evt.reason : null;
-        if (specificReason) {
-          for (const [key, rows] of grouped) {
-            const [kType] = key.split("|");
-            if (kType !== type) continue;
-            const overlapsSameEvent = rows.some(
-              (r) =>
-                r.reason === specificReason &&
-                windowsOverlap(evt.start_epoch, evt.end_epoch, r.start_epoch, r.end_epoch),
-            );
-            if (overlapsSameEvent) {
-              rows.push(evt);
-              placed = true;
-              break;
-            }
-          }
-        }
-      }
-      if (!placed) grouped.set(`${type}|${evt.start_epoch}`, [evt]);
+      if (!placed) grouped.push([evt]);
     }
 
+    // The row that carries the most information (history over live, a specific
+    // reason over "Unallocated", earliest start) is the "face" of the event.
     const preferredIds = new Set<number>();
-    for (const rows of grouped.values()) {
-      if (rows.length === 1) {
-        preferredIds.add(rows[0]!.id);
-        continue;
-      }
+    const groupMembers = new Map<number, DowntimeRow[]>();
+    for (const rows of grouped) {
       rows.sort((a, b) => {
         const aHistory = a.source === "history";
         const bHistory = b.source === "history";
@@ -737,11 +725,10 @@ Deno.serve(async (req: Request) => {
         if (aSpecific !== bSpecific) return aSpecific ? -1 : 1;
         return a.start_epoch - b.start_epoch;
       });
-      preferredIds.add(rows[0]!.id);
+      const preferred = rows[0]!;
+      preferredIds.add(preferred.id);
+      for (const r of rows) groupMembers.set(r.id, rows);
     }
-    const droppedDuplicateIds = events
-      .map((e) => e.id)
-      .filter((id) => !preferredIds.has(id));
 
     // Enrich candidate events with the freshest express history so the alert
     // carries the assigned reason/category and the true resolution state
@@ -773,10 +760,38 @@ Deno.serve(async (req: Request) => {
         duration_ms: fresh.duration_ms ?? evt.duration_ms,
       };
     });
-    const enrichedById = new Map(enrichedEvents.map((e) => [e.id, e]));
-    const enrichedCount = enrichedEvents.filter(
-      (e, i) => JSON.stringify(e) !== JSON.stringify(events[i]),
-    ).length;
+    const enrichedById = new Map<number, DowntimeRow>(enrichedEvents.map((e) => [e.id, e] as const));
+
+    // Merge each group into a single logical event: the face row supplies the
+    // content (most specific reason wins), but alert state is the union of
+    // every member — so a sibling row can't re-fire an alert the event already
+    // sent — and the event counts as resolved the moment any member is resolved,
+    // so a stuck ghost row stops escalating once the real span has ended.
+    const logicalEvents = new Map<number, DowntimeRow>();
+    for (const rows of grouped) {
+      const enrichedRows = rows.map((r) => enrichedById.get(r.id) ?? r);
+      const specific = enrichedRows.filter((r) => r.reason && r.reason !== "Unallocated");
+      const face = specific[0]! ?? enrichedRows[0]!;
+      const resolvedRows = enrichedRows.filter((r) => r.resolved);
+      const logical: DowntimeRow = {
+        ...face,
+        alert_sent: enrichedRows.some((r) => r.alert_sent),
+        resolved_alert_sent: enrichedRows.some((r) => r.resolved_alert_sent),
+        last_escalation_minutes:
+          enrichedRows.reduce((m, r) => Math.max(m, r.last_escalation_minutes ?? 0), 0) || null,
+        resolved: face.resolved || resolvedRows.length > 0,
+      };
+      if (resolvedRows.length > 0) {
+        const resolvedRow = resolvedRows.sort(
+          (a, b) => (a.end_epoch ?? 0) - (b.end_epoch ?? 0),
+        )[0]!;
+        logical.end_epoch = resolvedRow.end_epoch ?? face.end_epoch;
+        logical.duration_ms =
+          resolvedRow.duration_ms ??
+          (resolvedRow.end_epoch ? resolvedRow.end_epoch - resolvedRow.start_epoch : null);
+      }
+      for (const r of rows) logicalEvents.set(r.id, logical);
+    }
 
     let occurredCount = 0;
     let resolvedCount = 0;
@@ -789,13 +804,16 @@ Deno.serve(async (req: Request) => {
         skippedCount++;
         continue;
       }
-      const enriched = enrichedById.get(evt.id) ?? evt;
+      // The logical event unions the alert state of every row in the group, so
+      // a sibling row can't re-fire a chain the event already sent.
+      const enriched = logicalEvents.get(evt.id) ?? enrichedById.get(evt.id) ?? evt;
+      const members = groupMembers.get(evt.id) ?? [evt];
       const runningSlow = isRunningSlow(enriched);
-      const needsOccurred = !evt.alert_sent && !enriched.resolved;
-      const needsResolved = !evt.resolved_alert_sent && enriched.resolved;
+      const needsOccurred = !enriched.alert_sent && !enriched.resolved;
+      const needsResolved = !enriched.resolved_alert_sent && enriched.resolved;
       // An event that already fired its initial alert is still a candidate for
       // escalation while it remains unresolved — it must not be skipped here.
-      const needsEscalation = !enriched.resolved && evt.alert_sent;
+      const needsEscalation = !enriched.resolved && enriched.alert_sent;
 
       if (!needsOccurred && !needsResolved && !needsEscalation) {
         skippedCount++;
@@ -838,14 +856,16 @@ Deno.serve(async (req: Request) => {
           // one so a duplicate "still ongoing" alert isn't sent immediately.
           const crossed = escalationMinutes.filter((m) => effectiveDurationMs >= m * 60_000);
           const lastEscalation = crossed.length > 0 ? Math.max(...crossed) : null;
-          await supabase
-            .from("downtime_events")
-            .update({
-              alert_sent: true,
-              last_escalation_minutes: lastEscalation,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", evt.id);
+          for (const m of members) {
+            await supabase
+              .from("downtime_events")
+              .update({
+                alert_sent: true,
+                last_escalation_minutes: lastEscalation,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", m.id);
+          }
           occurredCount++;
         } else {
           failed.push(evt.id);
@@ -860,10 +880,12 @@ Deno.serve(async (req: Request) => {
         // Running Slow is informational only — no resolved notification. Mark
         // the flag so it isn't picked up again on the next run.
         if (runningSlow) {
-          await supabase
-            .from("downtime_events")
-            .update({ resolved_alert_sent: true, updated_at: new Date().toISOString() })
-            .eq("id", enriched.id);
+          for (const m of members) {
+            await supabase
+              .from("downtime_events")
+              .update({ resolved_alert_sent: true, updated_at: new Date().toISOString() })
+              .eq("id", m.id);
+          }
           continue;
         }
         const payload = buildResolvedMessage(enriched, ctx);
@@ -879,10 +901,12 @@ Deno.serve(async (req: Request) => {
           httpStatus: res.httpStatus,
         });
         if (res.ok) {
-          await supabase
-            .from("downtime_events")
-            .update({ resolved_alert_sent: true, updated_at: new Date().toISOString() })
-            .eq("id", enriched.id);
+          for (const m of members) {
+            await supabase
+              .from("downtime_events")
+              .update({ resolved_alert_sent: true, updated_at: new Date().toISOString() })
+              .eq("id", m.id);
+          }
           resolvedCount++;
         } else {
           failed.push(enriched.id);
@@ -894,12 +918,12 @@ Deno.serve(async (req: Request) => {
       // escalate, so routine planned/setup stops and running-slow notices never
       // page people.
       const isUnplanned = (enriched.downtime_type ?? "").toUpperCase() === "UNPLANNED";
-      if (!enriched.resolved && evt.alert_sent && isUnplanned && !runningSlow) {
+      if (!enriched.resolved && enriched.alert_sent && isUnplanned && !runningSlow) {
         // Pick the highest threshold the event has now crossed that hasn't been
         // alerted yet, so a long-running downtime jumps straight to the correct
         // level instead of replaying 30/60/120 over consecutive runs.
         const crossed = escalationMinutes.filter(
-          (m) => effectiveDurationMs >= m * 60_000 && (evt.last_escalation_minutes ?? 0) < m,
+          (m) => effectiveDurationMs >= m * 60_000 && (enriched.last_escalation_minutes ?? 0) < m,
         );
         if (crossed.length > 0) {
           const m = crossed[crossed.length - 1]!;
@@ -916,10 +940,12 @@ Deno.serve(async (req: Request) => {
             httpStatus: res.httpStatus,
           });
           if (res.ok) {
-            await supabase
-              .from("downtime_events")
-              .update({ last_escalation_minutes: m, updated_at: new Date().toISOString() })
-              .eq("id", enriched.id);
+            for (const mb of members) {
+              await supabase
+                .from("downtime_events")
+                .update({ last_escalation_minutes: m, updated_at: new Date().toISOString() })
+                .eq("id", mb.id);
+            }
             escalationCount++;
           } else {
             failed.push(enriched.id);

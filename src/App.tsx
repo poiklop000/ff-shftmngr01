@@ -40,7 +40,7 @@ import { fetchDowntimeForShift, type DowntimeEvent } from '@/lib/downtime';
 import { saveMonitoringRecord, loadMonitoringRecord, buildActiveJobSnapshot, type ActiveJobSnapshot } from '@/lib/monitoring';
 import { fetchOfsStatus } from '@/lib/ofs';
 import { syncAllData } from '@/lib/captureSync';
-import { loadBoardConfig } from '@/lib/boardConfig';
+import { loadBoardConfig, type BoardShiftLayout } from '@/lib/boardConfig';
 
 const VIEW_KEY = 'canning_calc_view';
 
@@ -127,6 +127,7 @@ export default function App() {
   // shown at all, and how long each view stays before rotating.
   const [boardEnabled, setBoardEnabled] = useState(true);
   const [boardTransitionMs, setBoardTransitionMs] = useState(20000);
+  const [boardShiftLayout, setBoardShiftLayout] = useState<BoardShiftLayout>('12h');
 
   // Which view is actually shown (falls back to the first allowed one). Kept
   // here, before the login gate, so the Board layout and its nav auto-hide can
@@ -202,6 +203,7 @@ export default function App() {
         if (!mounted) return;
         setBoardEnabled(cfg.enabled);
         setBoardTransitionMs(cfg.transitionMs);
+        setBoardShiftLayout(cfg.shiftLayout);
       })
       .catch(() => {});
     return () => { mounted = false; };
@@ -814,7 +816,7 @@ function epochToConsoleTime(
             date={data.date}
           />
         ) : effectiveView === 'board' ? (
-          <BoardView transitionMs={boardTransitionMs} />
+          <BoardView transitionMs={boardTransitionMs} shiftLayout={boardShiftLayout} />
         ) : effectiveView === 'downtime' ? (
           <DowntimeHistory
             date={data.date}

@@ -9,6 +9,7 @@ import {
   User as UserIcon,
 } from 'lucide-react';
 import { loadLiveIntervals } from '@/lib/liveConfig';
+import type { BoardShiftLayout } from '@/lib/boardConfig';
 import {
   classifyLineState,
   fetchOfsStatus,
@@ -35,7 +36,18 @@ const VIEW_ROTATE_MS = 20000;
 
 interface BoardViewProps {
   transitionMs?: number;
+  shiftLayout?: BoardShiftLayout;
 }
+
+type BoardMainView = 'status' | 'table' | 'prevTable' | 'prev2Table';
+
+// Short tab labels for the factory's 3x 8-hour shifts, used when the Board is
+// set to the "3 shifts" layout.
+const SHIFT8_LABELS: Record<string, string> = {
+  '1st': '1st · 06:00–14:00',
+  '2nd': '2nd · 14:00–22:00',
+  '3rd': '3rd · 22:00–06:00',
+};
 
 function dateToStr(d: Date): string {
   const y = d.getFullYear();
@@ -108,7 +120,32 @@ function detectShiftContext(status: OfsLiveStatus | null): { shift: Shift; date:
   return { shift, date };
 }
 
-export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
+// In the 3x8 layout the OFS shift type isn't usable (it reports a generic
+// code), so the current 8-hour shift is derived from the console clock:
+// 06:00-14:00 = 1st, 14:00-22:00 = 2nd, 22:00-06:00 = 3rd. A 3rd shift running
+// before 06:00 started at 22:00 on the previous calendar day.
+function detectThreeShiftContext(status: OfsLiveStatus | null): { shift: Shift; date: string } {
+  const consoleTime = status?.workcentre?.consoletimeText || status?.timestampText || '';
+  const match = consoleTime.match(/(\d{1,2}):(\d{2})/);
+  const hour = match ? parseInt(match[1], 10) : 6;
+  let shift: Shift;
+  if (hour >= 6 && hour < 14) shift = '1st';
+  else if (hour >= 14 && hour < 22) shift = '2nd';
+  else shift = '3rd';
+
+  const baseDate =
+    consoleTime.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ||
+    status?.shift?.startText?.slice(0, 10) ||
+    dateToStr(new Date());
+  if (shift === '3rd' && hour < 22) {
+    const d = new Date(`${baseDate}T00:00:00`);
+    d.setDate(d.getDate() - 1);
+    return { shift, date: dateToStr(d) };
+  }
+  return { shift, date: baseDate };
+}
+
+export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }: BoardViewProps) {
   const [status, setStatus] = useState<OfsLiveStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorTimedOut, setErrorTimedOut] = useState(false);
@@ -120,8 +157,12 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
   const [boardLoading, setBoardLoading] = useState(false);
   const [override, setOverride] = useState<JobOverride | null>(null);
   const [now, setNow] = useState(Date.now());
-  const [mainView, setMainView] = useState<'status' | 'table' | 'prevTable'>('status');
+  const [mainView, setMainView] = useState<BoardMainView>('status');
   const [viewSwitchAt, setViewSwitchAt] = useState(Date.now() + transitionMs);
+
+  // 3x8 layout shows the three 8-hour shift tables instead of the current
+  // 12-hour shift table (plus its previous shift).
+  const isThreeShiftLayout = shiftLayout === '3x8';
 
   // Live clock tick so the State Time counter keeps counting up on screen.
   useEffect(() => {
@@ -216,12 +257,51 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
     [prevShift, shift, date],
   );
 
-  const mainViews = useMemo<Array<'status' | 'table' | 'prevTable'>>(
-    () => (prevShift ? ['status', 'table', 'prevTable'] : ['status', 'table']),
-    [prevShift],
-  );
+  // The shift-table views differ by layout: 12h uses the detected 12-hour
+  // shift (plus its predecessor); 3x8 uses the current 8-hour shift read from
+  // the console clock plus its two predecessors, mirroring the same
+  // current/previous behaviour but covering the full 24-hour rotation.
+  const { tableShift, tableDate, tablePrevShift, tablePrevDate, tablePrev2Shift, tablePrev2Date } =
+    useMemo(() => {
+      if (isThreeShiftLayout) {
+        const ctx = detectThreeShiftContext(status);
+        const prev = previousShift(ctx.shift);
+        const prevDate = prev ? previousShiftDate(ctx.shift, ctx.date) : '';
+        const prev2 = prev ? previousShift(prev) : null;
+        const prev2Date = prev && prevDate ? previousShiftDate(prev, prevDate) : '';
+        return {
+          tableShift: ctx.shift,
+          tableDate: ctx.date,
+          tablePrevShift: prev,
+          tablePrevDate: prevDate,
+          tablePrev2Shift: prev2,
+          tablePrev2Date: prev2Date,
+        };
+      }
+      return {
+        tableShift: shift,
+        tableDate: date,
+        tablePrevShift: prevShift,
+        tablePrevDate: prevDate,
+        tablePrev2Shift: null,
+        tablePrev2Date: '',
+      };
+    }, [isThreeShiftLayout, status, shift, date, prevShift, prevDate]);
 
-  // Auto-rotate through the Live Status, current-shift and previous-shift views.
+  const mainViews = useMemo<BoardMainView[]>(() => {
+    const views: BoardMainView[] = ['status', 'table'];
+    if (tablePrevShift) views.push('prevTable');
+    if (isThreeShiftLayout && tablePrev2Shift && tablePrev2Date) views.push('prev2Table');
+    return views;
+  }, [isThreeShiftLayout, tablePrevShift, tablePrev2Shift, tablePrev2Date]);
+
+  // When the configured layout changes, fall back to a view that exists in the
+  // new rotation instead of leaving the board showing nothing.
+  useEffect(() => {
+    setMainView((v) => (mainViews.includes(v) ? v : 'status'));
+  }, [mainViews]);
+
+  // Auto-rotate through the Live Status and shift-table views.
   useEffect(() => {
     const id = window.setInterval(() => {
       setMainView((v) => {
@@ -240,7 +320,7 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
 
   const viewNextInSeconds = Math.max(0, Math.ceil((viewSwitchAt - now) / 1000));
 
-  const switchMainView = useCallback((view: 'status' | 'table' | 'prevTable') => {
+  const switchMainView = useCallback((view: BoardMainView) => {
     setMainView(view);
     setViewSwitchAt(Date.now() + transitionMs);
   }, [transitionMs]);
@@ -390,12 +470,12 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
                 ? 'bg-blue-900 text-white border-blue-900'
                 : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
             }`}
-            title="Show the hourly production table"
+            title={`Show the ${isThreeShiftLayout ? `${SHIFT_LABELS[tableShift]} ` : ''}production table`}
           >
             <TrendingUp size={13} />
-            Production
+            {isThreeShiftLayout ? SHIFT8_LABELS[tableShift] ?? 'Production' : 'Production'}
           </button>
-          {prevShift && (
+          {tablePrevShift && (
             <button
               type="button"
               role="tab"
@@ -406,10 +486,27 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
                   ? 'bg-blue-900 text-white border-blue-900'
                   : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
               }`}
-              title={`Show the previous shift (${SHIFT_LABELS[prevShift]}) production table`}
+              title={`Show the previous shift (${SHIFT_LABELS[tablePrevShift]}) production table`}
             >
               <TrendingUp size={13} />
-              Prev · {SHIFT_LABELS[prevShift]}
+              Prev · {isThreeShiftLayout ? (SHIFT8_LABELS[tablePrevShift] ?? SHIFT_LABELS[tablePrevShift]) : SHIFT_LABELS[tablePrevShift]}
+            </button>
+          )}
+          {isThreeShiftLayout && tablePrev2Shift && tablePrev2Date && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mainView === 'prev2Table'}
+              onClick={() => switchMainView('prev2Table')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-bold uppercase tracking-wide border transition-colors ${
+                mainView === 'prev2Table'
+                  ? 'bg-blue-900 text-white border-blue-900'
+                  : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
+              }`}
+              title={`Show the shift before the previous one (${SHIFT_LABELS[tablePrev2Shift]}) production table`}
+            >
+              <TrendingUp size={13} />
+              Prev-2 · {SHIFT8_LABELS[tablePrev2Shift] ?? SHIFT_LABELS[tablePrev2Shift]}
             </button>
           )}
         </div>
@@ -578,19 +675,32 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS }: BoardViewProps) {
           }`}
         >
           <div className={`h-full ${showDowntimeFlashBorder ? 'downtime-flash' : ''}`}>
-            <ShiftTableCard shift={shift} date={date} summaryRefreshMs={summaryRefreshMs} consoleTime={consoleTime} />
+            <ShiftTableCard shift={tableShift} date={tableDate} summaryRefreshMs={summaryRefreshMs} consoleTime={consoleTime} />
           </div>
         </div>
 
         {/* ---- Previous shift table view ---- */}
-        {prevShift && (
+        {tablePrevShift && tablePrevDate && (
           <div
             className={`absolute inset-0 transition-opacity duration-700 ${
               mainView === 'prevTable' ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none'
             }`}
           >
             <div className={`h-full ${showDowntimeFlashBorder ? 'downtime-flash' : ''}`}>
-              <ShiftTableCard shift={prevShift} date={prevDate} summaryRefreshMs={summaryRefreshMs} previous consoleTime={consoleTime} />
+              <ShiftTableCard shift={tablePrevShift} date={tablePrevDate} summaryRefreshMs={summaryRefreshMs} previous consoleTime={consoleTime} />
+            </div>
+          </div>
+        )}
+
+        {/* ---- Shift before the previous one (3x8 layout) ---- */}
+        {isThreeShiftLayout && tablePrev2Shift && tablePrev2Date && (
+          <div
+            className={`absolute inset-0 transition-opacity duration-700 ${
+              mainView === 'prev2Table' ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none'
+            }`}
+          >
+            <div className={`h-full ${showDowntimeFlashBorder ? 'downtime-flash' : ''}`}>
+              <ShiftTableCard shift={tablePrev2Shift} date={tablePrev2Date} summaryRefreshMs={summaryRefreshMs} previous consoleTime={consoleTime} />
             </div>
           </div>
         )}

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Send, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { loadBoardConfig, saveBoardConfig } from '@/lib/boardConfig';
+import { loadBoardConfig, saveBoardConfig, type BoardShiftLayout } from '@/lib/boardConfig';
 
 export function BoardConfig() {
   const [enabled, setEnabled] = useState(true);
   const [transitionSecs, setTransitionSecs] = useState('20');
+  const [layout, setLayout] = useState<BoardShiftLayout>('12h');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -20,6 +21,7 @@ export function BoardConfig() {
         if (cancelled) return;
         setEnabled(cfg.enabled);
         setTransitionSecs(String(Math.max(1, Math.round(cfg.transitionMs / 1000))));
+        setLayout(cfg.shiftLayout);
       } catch {
         if (!cancelled) setError('Could not load current settings.');
       } finally {
@@ -39,7 +41,7 @@ export function BoardConfig() {
     setError(null);
     setSaved(false);
     try {
-      await saveBoardConfig(enabled, secs * 1000);
+      await saveBoardConfig(enabled, secs * 1000, layout);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
@@ -47,7 +49,7 @@ export function BoardConfig() {
     } finally {
       setSaving(false);
     }
-  }, [enabled, transitionSecs]);
+  }, [enabled, transitionSecs, layout]);
 
   return (
     <div className="card" style={{ background: 'var(--card-bg)' }}>
@@ -90,6 +92,38 @@ export function BoardConfig() {
           </div>
           <small style={{ display: 'block', marginTop: 8, color: 'var(--text-muted)', fontSize: 12 }}>
             How many seconds each Board view stays on screen before rotating to the other.
+          </small>
+
+          <div style={{ marginTop: 18 }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Shift layout</label>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className={`tab-btn ${layout === '12h' ? 'tab-btn-blue' : ''}`}
+                onClick={() => setLayout('12h')}
+                style={{ textAlign: 'left', lineHeight: 1.5 }}
+                title="Show the current 12-hour shift table (plus the previous shift)"
+              >
+                <strong>2 × 12-hour shifts</strong>
+                <br />
+                <span style={{ fontWeight: 500, fontSize: 12 }}>06:00–18:00 / 18:00–06:00</span>
+              </button>
+              <button
+                type="button"
+                className={`tab-btn ${layout === '3x8' ? 'tab-btn-blue' : ''}`}
+                onClick={() => setLayout('3x8')}
+                style={{ textAlign: 'left', lineHeight: 1.5 }}
+                title="Show three separate 8-hour shift tables (1st, 2nd, 3rd)"
+              >
+                <strong>3 × 8-hour shifts</strong>
+                <br />
+                <span style={{ fontWeight: 500, fontSize: 12 }}>06:00–14:00 / 14:00–22:00 / 22:00–06:00</span>
+              </button>
+            </div>
+          </div>
+          <small style={{ display: 'block', marginTop: 8, color: 'var(--text-muted)', fontSize: 12 }}>
+            12-hour: the Board rotates Live Status, the current shift table and the previous shift's
+            table. 3-shift: it rotates Live Status plus the three 8-hour shift tables (1st, 2nd, 3rd).
           </small>
 
           {error && (

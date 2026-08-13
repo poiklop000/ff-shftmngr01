@@ -456,7 +456,7 @@ Deno.serve(async (req: Request) => {
     const liveIds = new Set(liveStateSpans.map((s) => s.id!));
     const { data: openLiveRows } = await supabase
       .from("downtime_events")
-      .select("id, start_epoch, downtime_type")
+      .select("id, start_epoch, downtime_type, reason")
       .in("downtime_type", ["SETUP", "RUNNING_SLOW"])
       .eq("resolved", false)
       .eq("user_edited", false);
@@ -464,6 +464,7 @@ Deno.serve(async (req: Request) => {
       id: number;
       start_epoch: number;
       downtime_type: string | null;
+      reason: string | null;
     }>;
 
     // User-corrected setup/slow rows are off-limits: never resolve, adopt,
@@ -581,6 +582,10 @@ Deno.serve(async (req: Request) => {
       if (match) {
         const patch = { ...rec };
         delete (patch as { id?: number }).id;
+        // Keep an existing reason (e.g. a product name corrected via
+        // job_overrides) instead of overwriting it with the raw OFS value,
+        // mirroring capture-downtime's `existing.reason ?? liveEvt.reason`.
+        if (match.reason) patch.reason = match.reason;
         const { data, error } = await supabase
           .from("downtime_events")
           .update(patch)
@@ -589,9 +594,16 @@ Deno.serve(async (req: Request) => {
         if (error) throw new Error(error.message);
         upserted += data?.length ?? 0;
       } else {
+        const { data: existingRec } = await supabase
+          .from("downtime_events")
+          .select("reason")
+          .eq("id", rec.id ?? 0)
+          .maybeSingle();
+        const patch = { ...rec };
+        if (existingRec?.reason) delete (patch as { reason?: string | null }).reason;
         const { data, error } = await supabase
           .from("downtime_events")
-          .upsert(rec, { onConflict: "id" })
+          .upsert(patch, { onConflict: "id" })
           .select("id");
         if (error) throw new Error(error.message);
         upserted += data?.length ?? 0;

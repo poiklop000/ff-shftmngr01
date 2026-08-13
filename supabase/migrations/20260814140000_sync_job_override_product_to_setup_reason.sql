@@ -13,6 +13,10 @@
 -- unrelated setup is never renamed. sync-spans-history and capture-downtime
 -- both preserve an existing non-null reason on their live setup/slow upserts,
 -- so the corrected name is not reverted by the next poll.
+--
+-- Resetting the override (job_overrides row deleted) restores the setup
+-- reason to the job's raw OFS order name (job_snapshots.order_name is never
+-- overridden), so a "Reset to OFS" leaves every surface back on OFS values.
 
 CREATE OR REPLACE FUNCTION apply_job_override_product_to_setup_reason()
 RETURNS trigger
@@ -24,18 +28,26 @@ DECLARE
   v_job_start bigint;
   v_target_id bigint;
 BEGIN
-  v_name := btrim(NEW.product_name);
-  IF v_name = '' THEN
-    RETURN NEW;
+  IF TG_OP = 'DELETE' THEN
+    SELECT min(s.order_name) INTO v_name
+      FROM job_snapshots s
+     WHERE s.job_id = OLD.job_id
+       AND s.order_name IS NOT NULL;
+  ELSE
+    v_name := btrim(NEW.product_name);
+  END IF;
+
+  IF v_name IS NULL OR v_name = '' THEN
+    RETURN NULL;
   END IF;
 
   SELECT min(floor(extract(epoch FROM capture_time) * 1000))::bigint
     INTO v_job_start
     FROM job_snapshots
-   WHERE job_id = NEW.job_id;
+   WHERE job_id = COALESCE(NEW.job_id, OLD.job_id);
 
   IF v_job_start IS NULL THEN
-    RETURN NEW;
+    RETURN NULL;
   END IF;
 
   SELECT d.id INTO v_target_id
@@ -53,12 +65,18 @@ BEGIN
      WHERE id = v_target_id;
   END IF;
 
-  RETURN NEW;
+  RETURN NULL;
 END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_job_override_product_to_setup_reason ON job_overrides;
 CREATE TRIGGER trg_job_override_product_to_setup_reason
   AFTER INSERT OR UPDATE OF product_name ON job_overrides
+  FOR EACH ROW
+  EXECUTE FUNCTION apply_job_override_product_to_setup_reason();
+
+DROP TRIGGER IF EXISTS trg_job_override_product_to_setup_reason_del ON job_overrides;
+CREATE TRIGGER trg_job_override_product_to_setup_reason_del
+  AFTER DELETE ON job_overrides
   FOR EACH ROW
   EXECUTE FUNCTION apply_job_override_product_to_setup_reason();

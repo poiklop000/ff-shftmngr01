@@ -460,12 +460,15 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
       // sync-spans-history, which never removes source='history' rows). Adopt it
       // and drop our own same-event live row so there is exactly one row per
       // event — deleting the live row alone would just have it re-inserted,
-      // resetting its alert flags and re-firing the occurred alert.
+      // resetting its alert flags and re-firing the occurred alert. The
+      // downtime_type is intentionally not part of the match: OFS can classify
+      // the same event differently in express history (e.g. Unallocated) than
+      // in the live feed (e.g. Setup), which used to strand the history row as
+      // an unresolved ghost alongside the resolved live row.
       const expressRow = openEvents.find(
         (e) =>
           e.id !== span.id &&
           e.source === "history" &&
-          e.downtime_type === type &&
           (startsMatch(e.start_epoch, span.start) ||
             (spanReason && e.reason === spanReason)) &&
           windowsOverlap(e.start_epoch, e.end_epoch, span.start, null),
@@ -503,7 +506,7 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
           .from("downtime_events")
           .update({
             resolved: true,
-            end_epoch: evt.start_epoch + liveDuration,
+            end_epoch: existing.start_epoch + liveDuration,
             duration_ms: liveDuration,
             updated_at: new Date().toISOString(),
           })
@@ -597,6 +600,54 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
   };
 }
 
+// Self-healing pass for "ghost" downtime rows. A reclassified event can leave
+// an unresolved history row behind (express history never reported an end for
+// the old classification) while the live feed tracked the new classification
+// to a different row that was resolved normally. Once the live span leaves the
+// feed no capture run will ever adopt the ghost, and sync-spans-history never
+// resolves it, so it would show as ongoing forever. When a resolved sibling
+// starts within the start-matching tolerance, fold the ghost into that
+// sibling's resolution. Also covers plain duplicates from older versions.
+async function resolveGhosts(supabase: ReturnType<typeof getSupabase>): Promise<number> {
+  const { data: unresolved, error } = await supabase
+    .from("downtime_events")
+    .select("id, start_epoch")
+    .eq("console_id", CONSOLE)
+    .eq("resolved", false)
+    .eq("user_edited", false);
+  if (error) throw new Error(error.message);
+  if (!unresolved || unresolved.length === 0) return 0;
+
+  let resolvedCount = 0;
+  for (const ghost of unresolved as unknown as { id: number; start_epoch: number }[]) {
+    const { data: sibling, error: sibError } = await supabase
+      .from("downtime_events")
+      .select("end_epoch, duration_ms")
+      .eq("resolved", true)
+      .neq("id", ghost.id)
+      .gte("start_epoch", ghost.start_epoch - 60_000)
+      .lte("start_epoch", ghost.start_epoch + 60_000)
+      .order("start_epoch", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (sibError) throw new Error(sibError.message);
+    if (!sibling || sibling.end_epoch == null) continue;
+
+    const { error: updateError } = await supabase
+      .from("downtime_events")
+      .update({
+        resolved: true,
+        end_epoch: sibling.end_epoch,
+        duration_ms: sibling.duration_ms,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", ghost.id);
+    if (updateError) throw new Error(updateError.message);
+    resolvedCount++;
+  }
+  return resolvedCount;
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -619,10 +670,11 @@ Deno.serve(async (req: Request) => {
       return json({ ok: true, skipped: true, reason: "ofs_disabled" });
     }
     const result = await captureOnce(supabase);
+    const ghostsResolved = await resolveGhosts(supabase);
     console.log(
-      `[capture-downtime] ${new Date().toISOString()} action=${result.action} hasDowntime=${result.hasDowntime} active=${result.events.length}`,
+      `[capture-downtime] ${new Date().toISOString()} action=${result.action} hasDowntime=${result.hasDowntime} active=${result.events.length} ghostsResolved=${ghostsResolved}`,
     );
-    return json({ ok: true, ...result, timestamp: new Date().toISOString() });
+    return json({ ok: true, ...result, ghostsResolved, timestamp: new Date().toISOString() });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error(

@@ -3,8 +3,12 @@ import {
   Activity,
   AlertTriangle,
   Clock,
+  Factory,
   Gauge,
+  MonitorPlay,
   Package,
+  Tag,
+  Timer,
   TrendingUp,
   User as UserIcon,
 } from 'lucide-react';
@@ -394,25 +398,19 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
         borderColor: '#ca8a04',
         background: 'linear-gradient(180deg, #fefce8, #fef9c3)',
         overlay: 'rgba(133, 77, 14, 0.35)',
-        dot: '#ca8a04',
         titleColor: '#854d0e',
         tile: 'bg-yellow-100 border-yellow-200',
         textColor: 'text-yellow-900',
         tileSolid: 'bg-yellow-200',
-        divider: 'border-yellow-200',
-        footerColor: 'text-yellow-800',
       }
     : {
         borderColor: '#dc2626',
         background: 'linear-gradient(180deg, #fef2f2, #fee2e2)',
         overlay: 'rgba(127, 29, 29, 0.45)',
-        dot: '#dc2626',
         titleColor: '#991b1b',
         tile: 'bg-red-100 border-red-200',
         textColor: 'text-red-900',
         tileSolid: 'bg-red-200',
-        divider: 'border-red-200',
-        footerColor: 'text-red-700',
       };
 
   const estFinish = useMemo(() => {
@@ -706,64 +704,97 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
         )}
         </div>
 
-      {/* ---- Red Downtime popup ---- */}
+      {/* ---- Downtime / Running Slow alert popup ---- */}
       {showDowntimePopup && (
         <div
           className="modal-overlay"
           style={{ zIndex: 200, background: popupStyle.overlay, backdropFilter: 'blur(6px)', pointerEvents: 'none' }}
         >
           <div
-            className="modal-card"
-            style={{ maxWidth: 560, border: `3px solid ${popupStyle.borderColor}`, background: popupStyle.background }}
+            className="modal-card downtime-popup-card"
+            style={{ maxWidth: 580, border: `2px solid ${popupStyle.borderColor}`, background: popupStyle.background }}
             role="dialog"
             aria-modal="true"
             aria-label={activeIsSlow ? 'Line running slow alert' : 'Line downtime alert'}
           >
-            <div className={`flex items-center gap-2 mb-3 pb-3 border-b-2 ${popupStyle.divider}`}>
-              <span className="inline-block w-4 h-4 rounded-full animate-pulse" style={{ backgroundColor: popupStyle.dot }} />
-              <h2 className="m-0 text-2xl font-bold uppercase tracking-wide" style={{ color: popupStyle.titleColor }}>
-                {activeIsSlow ? 'Running Slow' : 'Downtime'}
-              </h2>
+            <div className="popup-accent-bar" style={{ backgroundColor: popupStyle.borderColor }} />
+
+            <div className="flex items-center gap-3 pb-4 mb-4 border-b-2" style={{ borderColor: popupStyle.borderColor }}>
+              <div className={`popup-icon-badge relative shrink-0 ${popupStyle.tileSolid}`} style={{ color: popupStyle.titleColor }}>
+                <AlertTriangle size={26} strokeWidth={2.5} />
+                <span className="popup-pulse-ring" style={{ borderColor: popupStyle.borderColor }} />
+                <span className="popup-pulse-ring popup-pulse-ring-delay" style={{ borderColor: popupStyle.borderColor }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h2 className="m-0 text-2xl font-extrabold uppercase tracking-wide" style={{ color: popupStyle.titleColor }}>
+                  {activeIsSlow ? 'Running Slow' : 'Downtime'}
+                </h2>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="popup-live-dot" style={{ backgroundColor: popupStyle.borderColor }} />
+                  <span className="text-xs font-bold uppercase tracking-widest opacity-70" style={{ color: popupStyle.titleColor }}>
+                    Live alert · {lineName}
+                  </span>
+                </div>
+              </div>
+              <span className={`popup-status-pill ${popupStyle.tileSolid}`} style={{ color: popupStyle.titleColor }}>
+                {activeIsSlow ? 'SLOW' : 'DOWN'}
+              </span>
             </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className={`rounded-lg p-3 border ${popupStyle.tile}`}>
-                <div className={`text-sm font-bold uppercase tracking-wide opacity-70 mb-1 ${popupStyle.textColor}`}>Line</div>
+              <div className={`popup-tile rounded-lg p-3 border ${popupStyle.tile}`}>
+                <div className={`flex items-center gap-1.5 mb-1.5 text-xs font-bold uppercase tracking-wider opacity-70 ${popupStyle.textColor}`}>
+                  <Factory size={13} strokeWidth={2.5} />
+                  Line
+                </div>
                 <div className={`text-xl font-bold ${popupStyle.textColor}`}>{lineName}</div>
               </div>
-              <div className={`rounded-lg p-3 border ${popupStyle.tile}`}>
-                <div className={`text-sm font-bold uppercase tracking-wide opacity-70 mb-1 ${popupStyle.textColor}`}>Type</div>
+              <div className={`popup-tile rounded-lg p-3 border ${popupStyle.tile}`}>
+                <div className={`flex items-center gap-1.5 mb-1.5 text-xs font-bold uppercase tracking-wider opacity-70 ${popupStyle.textColor}`}>
+                  <Activity size={13} strokeWidth={2.5} />
+                  Type
+                </div>
                 <div className={`text-xl font-bold ${popupStyle.textColor}`}>
                   {activeDowntimeEvent?.downtime_type === 'RUNNING_SLOW' ? 'Running Slow' : (activeDowntimeEvent?.downtime_type || stateLabel)}
                 </div>
               </div>
-              <div className={`rounded-lg p-3 border ${popupStyle.tile}`}>
-                <div className={`text-sm font-bold uppercase tracking-wide opacity-70 mb-1 ${popupStyle.textColor}`}>Elapsed</div>
+              <div className={`popup-tile rounded-lg p-3 border ${popupStyle.tile}`}>
+                <div className={`flex items-center gap-1.5 mb-1.5 text-xs font-bold uppercase tracking-wider opacity-70 ${popupStyle.textColor}`}>
+                  <Timer size={13} strokeWidth={2.5} />
+                  Elapsed
+                </div>
                 <div className={`text-xl font-bold tabular-nums ${popupStyle.textColor}`}>{downtimeElapsed}</div>
               </div>
-              <div className={`rounded-lg p-3 border ${popupStyle.tile}`}>
-                <div className={`text-sm font-bold uppercase tracking-wide opacity-70 mb-1 ${popupStyle.textColor}`}>Console</div>
+              <div className={`popup-tile rounded-lg p-3 border ${popupStyle.tile}`}>
+                <div className={`flex items-center gap-1.5 mb-1.5 text-xs font-bold uppercase tracking-wider opacity-70 ${popupStyle.textColor}`}>
+                  <MonitorPlay size={13} strokeWidth={2.5} />
+                  Console
+                </div>
                 <div className={`text-xl font-bold tabular-nums ${popupStyle.textColor}`}>{formatConsoleTime(consoleTime)}</div>
               </div>
             </div>
-            <div className={`mt-3 rounded-lg p-3 border ${popupStyle.tile}`}>
-              <div className={`text-sm font-bold uppercase tracking-wide opacity-70 mb-1 ${popupStyle.textColor}`}>Reason</div>
+
+            <div className={`popup-tile mt-3 rounded-lg p-3 border ${popupStyle.tile}`}>
+              <div className={`flex items-center gap-1.5 mb-1.5 text-xs font-bold uppercase tracking-wider opacity-70 ${popupStyle.textColor}`}>
+                <Tag size={13} strokeWidth={2.5} />
+                Reason
+              </div>
               <div className={`text-lg font-bold ${popupStyle.textColor}`}>
                 {activeDowntimeEvent?.reason?.trim() || 'Not classified yet'}
               </div>
               {activeDowntimeEvent?.category?.trim() ? (
-                <div className={`mt-1 inline-block rounded-full px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide ${popupStyle.tileSolid}`} style={{ color: popupStyle.titleColor }}>
+                <div className={`mt-1.5 inline-block rounded-full px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide ${popupStyle.tileSolid}`} style={{ color: popupStyle.titleColor }}>
                   {activeDowntimeEvent.category}
                 </div>
               ) : null}
             </div>
-            <div className={`flex flex-col gap-1 mt-4 pt-3 border-t text-sm font-semibold ${popupStyle.divider} ${popupStyle.footerColor}`}>
-              <div className="flex items-center gap-2">
-                <AlertTriangle size={16} className="shrink-0" />
-                {activeIsSlow
-                  ? 'The line is running below rated speed.'
-                  : 'The line is down.'}
-              </div>
-              {!activeIsSlow && <div className="pl-6">Please provide reason or next job.</div>}
+
+            <div className={`popup-attention-strip mt-4 ${activeIsSlow ? 'popup-attention-strip-slow' : ''}`}>
+              <AlertTriangle size={16} className="shrink-0" />
+              <span>
+                {activeIsSlow ? 'The line is running below rated speed.' : 'The line is down.'}
+                {!activeIsSlow && ' Please provide reason or next job.'}
+              </span>
             </div>
           </div>
         </div>

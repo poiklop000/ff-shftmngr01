@@ -111,6 +111,7 @@ interface DowntimeRow {
   alert_sent: boolean | null;
   resolved_alert_sent: boolean | null;
   last_escalation_minutes: number | null;
+  metadata: Record<string, unknown> | null;
 }
 
 function getSupabase() {
@@ -181,38 +182,130 @@ interface JobContext {
   orderName: string | null;
 }
 
-// Find the active job snapshot captured just before the event started, so
-// alerts can show which product was running. A user correction (job_overrides)
-// layered on the captured product name wins over the raw OFS order name.
+// Find the job context (product) for an event so alerts can show which product
+// was involved. A user correction (job_overrides) layered on the captured
+// product name wins over the raw OFS order name.
+//
+// Setup events prepare the job being brought onto the line, and OFS lags
+// switching the active job several minutes after the setup span starts — the
+// snapshot before the setup can still show the previous product (e.g. a Pals
+// Guava setup starting at 14:19 bucketed under the Captains job running at the
+// 14:15 snapshot). So setups attribute by the captured product
+// (metadata.order_client_id / order) matched against the jobs by SKU / order
+// name, falling back to the first snapshot at/after the event start. Non-setup
+// events report the job that was running when they started.
 async function findJobContext(
   supabase: ReturnType<typeof getSupabase>,
-  startEpoch: number,
+  evt: Pick<DowntimeRow, "start_epoch" | "downtime_type" | "metadata">,
 ): Promise<JobContext | null> {
+  const isSetup = (evt.downtime_type ?? "").toUpperCase() === "SETUP";
   const { data } = await supabase
     .from("job_snapshots")
-    .select("job_id, product_name, order_name, sku")
+    .select("job_id, product_name, order_name, sku, capture_time")
     .not("job_id", "is", null)
-    .lte("capture_time", new Date(startEpoch).toISOString())
-    .order("capture_time", { ascending: false })
-    .limit(1);
-  const row = data?.[0] as
-    | { job_id?: number | null; product_name?: string | null; order_name?: string | null }
-    | undefined;
-  if (!row) return null;
+    .gte("capture_time", new Date(evt.start_epoch - 24 * 60 * 60_000).toISOString())
+    .order("capture_time", { ascending: true });
+  const rows = (data ?? []) as Array<{
+    job_id: number | null;
+    product_name?: string | null;
+    order_name?: string | null;
+    sku?: string | null;
+    capture_time: string;
+  }>;
+  if (rows.length === 0) return null;
 
-  let product: string | null = row.product_name ?? null;
-  if (row.job_id != null) {
-    const { data: override } = await supabase
-      .from("job_overrides")
-      .select("product_name")
-      .eq("job_id", row.job_id)
-      .maybeSingle();
-    if (override?.product_name) product = override.product_name;
+  const eventT = evt.start_epoch;
+  let chosen: (typeof rows)[number] | null = null;
+
+  if (isSetup) {
+    const metadata = (evt.metadata ?? {}) as Record<string, unknown>;
+    const orderClientId =
+      typeof metadata.order_client_id === "string" ? metadata.order_client_id.trim().toLowerCase() : "";
+    const order = typeof metadata.order === "string" ? metadata.order.trim().toLowerCase() : "";
+
+    const bySku = new Map<string, number[]>();
+    const byOrderName = new Map<string, number[]>();
+    const firstCapture = new Map<number, number>();
+    for (const r of rows) {
+      if (r.job_id == null) continue;
+      const t = new Date(r.capture_time).getTime();
+      if (!firstCapture.has(r.job_id)) firstCapture.set(r.job_id, t);
+      if (r.sku) {
+        const key = r.sku.trim().toLowerCase();
+        const arr = bySku.get(key) ?? [];
+        if (!arr.includes(r.job_id)) arr.push(r.job_id);
+        bySku.set(key, arr);
+      }
+      if (r.order_name) {
+        const key = r.order_name.trim().toLowerCase();
+        const arr = byOrderName.get(key) ?? [];
+        if (!arr.includes(r.job_id)) arr.push(r.job_id);
+        byOrderName.set(key, arr);
+      }
+    }
+
+    let candidates: number[] = [];
+    if (orderClientId) candidates = bySku.get(orderClientId) ?? [];
+    if (candidates.length === 0 && order) candidates = byOrderName.get(order) ?? [];
+
+    let picked: number | null = null;
+    if (candidates.length > 0) {
+      // The setup brings the product onto the line: prefer the matching job
+      // whose first capture is the earliest at/after the event start, else the
+      // latest before it.
+      let bestAtOrAfter = Infinity;
+      for (const id of candidates) {
+        const fc = firstCapture.get(id) ?? Infinity;
+        if (fc >= eventT && fc < bestAtOrAfter) {
+          bestAtOrAfter = fc;
+          picked = id;
+        }
+      }
+      if (picked === null) {
+        let lastBefore = -Infinity;
+        for (const id of candidates) {
+          const fc = firstCapture.get(id) ?? -Infinity;
+          if (fc <= eventT && fc > lastBefore) {
+            lastBefore = fc;
+            picked = id;
+          }
+        }
+      }
+    }
+    if (picked !== null) chosen = rows.find((r) => r.job_id === picked) ?? null;
+    if (!chosen) {
+      // No captured product to match on — the setup prepares the next job, which
+      // OFS activates the moment setup begins, so use the first snapshot at/after
+      // the start instead of the last one before it.
+      for (const r of rows) {
+        if (new Date(r.capture_time).getTime() >= eventT) {
+          chosen = r;
+          break;
+        }
+      }
+    }
+  } else {
+    for (const r of rows) {
+      const t = new Date(r.capture_time).getTime();
+      if (t <= eventT) chosen = r;
+      else break;
+    }
   }
+  if (!chosen || chosen.job_id == null) return null;
+
+  // order_name is the human-readable product label (OFS product_name holds the
+  // SKU, e.g. "P-134"); a user correction layered on the captured values wins.
+  let product: string | null = chosen.order_name ?? chosen.product_name ?? null;
+  const { data: override } = await supabase
+    .from("job_overrides")
+    .select("product_name")
+    .eq("job_id", chosen.job_id)
+    .maybeSingle();
+  if (override?.product_name) product = override.product_name;
 
   return {
     product,
-    orderName: row.order_name ?? null,
+    orderName: chosen.order_name ?? null,
   };
 }
 
@@ -643,6 +736,7 @@ Deno.serve(async (req: Request) => {
           alert_sent: false,
           resolved_alert_sent: false,
           last_escalation_minutes: null,
+          metadata: null,
         };
         if (isRunningSlow(mockEvt)) {
           mockEvt.downtime_type = "RUNNING_SLOW";
@@ -679,7 +773,7 @@ Deno.serve(async (req: Request) => {
     //     AND total duration >= threshold
     const { data: events, error } = await supabase
       .from("downtime_events")
-      .select("id, console_name, downtime_type, reason, category, source, start_epoch, duration_ms, start_text, crew_name, resolved, end_epoch, alert_sent, resolved_alert_sent, last_escalation_minutes")
+      .select("id, console_name, downtime_type, reason, category, source, start_epoch, duration_ms, start_text, crew_name, resolved, end_epoch, alert_sent, resolved_alert_sent, last_escalation_minutes, metadata")
       .or(`and(alert_sent.eq.false,resolved.eq.false),and(alert_sent.eq.true,resolved.eq.false),and(resolved_alert_sent.eq.false,resolved.eq.true,end_epoch.gte.${recentEndCutoffMs})`)
       .order("start_epoch", { ascending: false });
 
@@ -826,8 +920,8 @@ Deno.serve(async (req: Request) => {
         ? (enriched.duration_ms ?? (enriched.end_epoch ? enriched.end_epoch - enriched.start_epoch : 0))
         : (nowMs - enriched.start_epoch);
 
-      // Job context (product for the alert) 
-      const ctx = await findJobContext(supabase, enriched.start_epoch);
+      // Job context (product for the alert)
+      const ctx = await findJobContext(supabase, enriched);
       const product = ctx?.product ?? ctx?.orderName ?? null;
 
       if (needsOccurred) {

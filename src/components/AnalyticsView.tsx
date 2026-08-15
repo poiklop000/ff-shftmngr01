@@ -74,6 +74,118 @@ function jobAtEpoch(epoch: number, snapshots: JobSnapshotRow[]): number | null {
   return last;
 }
 
+// Which job a setup/changeover event belongs to. A setup prepares the job being
+// brought onto the line, and OFS activates that job the moment setup begins —
+// but job snapshots are ~5 minutes apart, so the last snapshot before the
+// setup's start can still show the previous job (e.g. a setup starting at 14:19
+// is bucketed under the job that was still running at the 14:15 snapshot).
+// Attribute the setup to the job from the first snapshot at or after its start,
+// falling back to the job running at its start when no later snapshot exists.
+function jobForEvent(e: DowntimeEvent, snapshots: JobSnapshotRow[]): number | null {
+  if ((e.downtime_type ?? '').toUpperCase() === 'SETUP') {
+    for (const row of snapshots) {
+      if (new Date(row.capture_time).getTime() >= e.start_epoch) return row.job_id;
+    }
+  }
+  return jobAtEpoch(e.start_epoch, snapshots);
+}
+
+// Resolves the job a captured setup/slow event belongs to, in order of
+// reliability:
+//   1. The event's own job id (express-history spans carry one from OFS).
+//   2. The captured product (metadata.order_client_id / order) matched against
+//      the jobs in range by SKU / order name. This is timing-independent and
+//      correct even when OFS lags switching the active job several minutes
+//      after the setup span started (OFS leaves setup spans jobId-less).
+//   3. Snapshot timing heuristics (jobForEvent) as a last resort for events
+//      with no captured product (e.g. a generic "Setup / Changeover").
+// When several jobs match the same product, the one whose first capture is the
+// earliest at/after the event start is the job the setup brought onto the line.
+function buildJobProductIndex(snapshots: JobSnapshotRow[]) {
+  const bySku = new Map<string, number[]>();
+  const byOrderName = new Map<string, number[]>();
+  const firstCapture = new Map<number, number>();
+  const seenPairs = new Set<string>();
+  for (const row of snapshots) {
+    if (row.job_id === null) continue;
+    const t = new Date(row.capture_time).getTime();
+    if (!firstCapture.has(row.job_id)) firstCapture.set(row.job_id, t);
+    if (row.sku) {
+      const key = row.sku.trim().toLowerCase();
+      const pair = `sku:${key}:${row.job_id}`;
+      if (!seenPairs.has(pair)) {
+        seenPairs.add(pair);
+        const list = bySku.get(key) ?? [];
+        list.push(row.job_id);
+        bySku.set(key, list);
+      }
+    }
+    if (row.order_name) {
+      const key = row.order_name.trim().toLowerCase();
+      const pair = `order:${key}:${row.job_id}`;
+      if (!seenPairs.has(pair)) {
+        seenPairs.add(pair);
+        const list = byOrderName.get(key) ?? [];
+        list.push(row.job_id);
+        byOrderName.set(key, list);
+      }
+    }
+  }
+  return { bySku, byOrderName, firstCapture };
+}
+
+type JobProductIndex = ReturnType<typeof buildJobProductIndex>;
+
+function pickJobByTime(
+  candidates: number[],
+  firstCapture: Map<number, number>,
+  startEpoch: number,
+): number | null {
+  let best: number | null = null;
+  let bestAtOrAfter = Infinity;
+  for (const id of candidates) {
+    const fc = firstCapture.get(id) ?? Infinity;
+    if (fc >= startEpoch && fc < bestAtOrAfter) {
+      best = id;
+      bestAtOrAfter = fc;
+    }
+  }
+  if (best !== null) return best;
+  let last: number | null = null;
+  let lastBefore = -Infinity;
+  for (const id of candidates) {
+    const fc = firstCapture.get(id) ?? -Infinity;
+    if (fc <= startEpoch && fc > lastBefore) {
+      last = id;
+      lastBefore = fc;
+    }
+  }
+  return last;
+}
+
+function jobForEventResolved(
+  e: DowntimeEvent,
+  index: JobProductIndex,
+  snapshots: JobSnapshotRow[],
+): number | null {
+  // OFS reports jobId 0 (not null) for spans with no usable job, so only a
+  // positive id is authoritative — 0 must fall through to product/snapshot
+  // matching like a missing id.
+  if (e.job_id != null && e.job_id > 0) return e.job_id;
+  let candidates: number[] = [];
+  if (e.order_client_id) {
+    candidates = index.bySku.get(e.order_client_id.trim().toLowerCase()) ?? [];
+  }
+  if (candidates.length === 0 && e.order) {
+    candidates = index.byOrderName.get(e.order.trim().toLowerCase()) ?? [];
+  }
+  if (candidates.length > 0) {
+    const byTime = pickJobByTime(candidates, index.firstCapture, e.start_epoch);
+    if (byTime !== null) return byTime;
+  }
+  return jobForEvent(e, snapshots);
+}
+
 const ANALYTICS_PERSIST_KEY = 'ff_analytics_persist_v1';
 
 interface AnalyticsPersistState {
@@ -412,11 +524,12 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
     let list = data.downtime;
     if (jobFilters.length > 0) {
       // Downtime events rarely carry a usable job id (OFS reports 0), so match
-      // on the job that was running when each event started.
+      // on the job the event belongs to (see jobForEventResolved).
+      const productIndex = buildJobProductIndex(data.jobs);
       list = list.filter(
         (e) =>
           jobFilters.includes(e.job_id ?? -1) ||
-          jobFilters.includes(jobAtEpoch(e.start_epoch, data.jobs) ?? -1),
+          jobFilters.includes(jobForEventResolved(e, productIndex, data.jobs) ?? -1),
       );
     }
     if (typeFilters.length > 0) {

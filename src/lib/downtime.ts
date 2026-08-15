@@ -45,6 +45,8 @@ export interface DowntimeEvent {
   job_quantity: number | null;
   order_id: number | null;
   order_quantity: number | null;
+  order: string | null;
+  order_client_id: string | null;
   user_id: number | null;
   user_name: string | null;
   comments: DowntimeComment[] | null;
@@ -145,6 +147,8 @@ function spanToEvent(span: ExpressSpan): DowntimeEvent {
     job_quantity: span.jobQuantity ?? null,
     order_id: span.orderId ?? null,
     order_quantity: span.orderQuantity ?? null,
+    order: null,
+    order_client_id: null,
     user_id: span.userId ?? null,
     user_name: userName,
     comments,
@@ -331,40 +335,45 @@ async function fetchDbEventsInEpochRange(
 
   if (error || !data) return [];
 
-  return data.map((row) => ({
-    id: row.id,
-    span_id: row.span_id,
-    state: row.state,
-    downtime_type: row.downtime_type,
-    reason: row.reason,
-    category: row.category,
-    start_epoch: row.start_epoch,
-    start_text: row.start_text,
-    end_epoch: row.end_epoch,
-    duration_ms: row.duration_ms,
-    resolved: row.resolved,
-    user_edited: row.user_edited === true,
-    span_class: row.span_class,
-    span_type: row.span_type,
-    reason_id: row.reason_id,
-    reason_category: row.reason_category,
-    reason_category_name: row.reason_category_name,
-    reason_type: row.reason_type,
-    crew_id: row.crew_id,
-    crew_name: row.crew_name,
-    shift_id: row.shift_id,
-    shift_start: row.shift_start,
-    shift_end: row.shift_end,
-    job_id: row.job_id,
-    job_start: row.job_start,
-    job_end: row.job_end,
-    job_quantity: row.job_quantity,
-    order_id: row.order_id,
-    order_quantity: row.order_quantity,
-    user_id: row.user_id,
-    user_name: row.user_name,
-    comments: null,
-  }));
+  return data.map((row) => {
+    const metadata = (row.metadata ?? {}) as Record<string, unknown>;
+    return {
+      id: row.id,
+      span_id: row.span_id,
+      state: row.state,
+      downtime_type: row.downtime_type,
+      reason: row.reason,
+      category: row.category,
+      start_epoch: row.start_epoch,
+      start_text: row.start_text,
+      end_epoch: row.end_epoch,
+      duration_ms: row.duration_ms,
+      resolved: row.resolved,
+      user_edited: row.user_edited === true,
+      span_class: row.span_class,
+      span_type: row.span_type,
+      reason_id: row.reason_id,
+      reason_category: row.reason_category,
+      reason_category_name: row.reason_category_name,
+      reason_type: row.reason_type,
+      crew_id: row.crew_id,
+      crew_name: row.crew_name,
+      shift_id: row.shift_id,
+      shift_start: row.shift_start,
+      shift_end: row.shift_end,
+      job_id: row.job_id,
+      job_start: row.job_start,
+      job_end: row.job_end,
+      job_quantity: row.job_quantity,
+      order_id: row.order_id,
+      order_quantity: row.order_quantity,
+      order: typeof metadata.order === 'string' ? metadata.order : null,
+      order_client_id: typeof metadata.order_client_id === 'string' ? metadata.order_client_id : null,
+      user_id: row.user_id,
+      user_name: row.user_name,
+      comments: null,
+    };
+  });
 }
 
 export function formatDuration(ms: number): string {

@@ -258,8 +258,10 @@ function spanToEvent(span: OfsSpanItem, allItems: OfsSpanItem[]): Partial<Downti
     (span.state?.includes("setup") ? "SETUP" : isSlow ? "RUNNING_SLOW" : null);
 
   // Setup spans carry no $reason — synthesize a readable label from the order.
+  // A shift change can split one setup into two spans; the continuation span
+  // carries no $order, but the job context (J/I spans) still has it.
   const setupReason = !reason && downtimeType === "SETUP"
-    ? (span.$order?.$product?.description ?? span.$order?.name ?? "Setup / Changeover")
+    ? (span.$order?.$product?.description ?? span.$order?.name ?? orderLabel(ctx.order ?? undefined) ?? "Setup / Changeover")
     : reason;
   const setupCategory = !category && downtimeType === "SETUP" ? "Setup" : category;
 
@@ -347,6 +349,102 @@ async function fetchLiveRowByIdentity(
     .maybeSingle();
   if (error) throw new Error(error.message);
   return (data as DowntimeEvent | null) ?? null;
+}
+
+// True when two events positively concern the same product: both carry an
+// order_client_id and they match, or both carry an order label and it matches.
+// Only positively-confirmed products qualify, so a shift-boundary continuation
+// is never merged into an unrelated setup that happens to end nearby.
+function sameProduct(a: DowntimeEvent, b: Partial<DowntimeEvent>): boolean {
+  const aId = a.metadata?.order_client_id as string | null | undefined;
+  const bId = b.metadata?.order_client_id as string | null | undefined;
+  if (aId && bId) return aId === bId;
+  const aOrder = a.metadata?.order as string | null | undefined;
+  const bOrder = b.metadata?.order as string | null | undefined;
+  if (aOrder && bOrder) return aOrder === bOrder;
+  return false;
+}
+
+// Finds the already-closed live row that a new span continues: OFS splits one
+// setup/slow event across a shift change into two spans with different ids and
+// starts, the second starting right where the first ended and concerning the
+// same product. Only live, unedited, resolved rows qualify. Spans with no
+// confirmable product never match, so product-less events (e.g. legacy rows
+// before order enrichment) are left alone.
+async function fetchContinuationRow(
+  supabase: ReturnType<typeof getSupabase>,
+  span: OfsSpanItem,
+  allItems: OfsSpanItem[],
+): Promise<DowntimeEvent | null> {
+  const type = eventTypeOf(span);
+  if (!type || span.start == null) return null;
+  const { data, error } = await supabase
+    .from("downtime_events")
+    .select("*")
+    .eq("console_id", CONSOLE)
+    .eq("downtime_type", type)
+    .eq("source", "live")
+    .eq("user_edited", false)
+    .eq("resolved", true)
+    .gte("end_epoch", span.start - 300_000)
+    .lte("end_epoch", span.start + 120_000)
+    .order("end_epoch", { ascending: false })
+    .limit(5);
+  if (error) throw new Error(error.message);
+  const candidate = ((data ?? []) as unknown as DowntimeEvent[]).find(
+    (e) => e.id !== span.id && sameProduct(e, spanToEvent(span, allItems)),
+  );
+  return candidate ?? null;
+}
+
+// Extends an already-closed row to cover a continuation span of the same
+// product (a shift change split one event into two OFS spans). The row keeps
+// its original reason/category — the descriptive one. The continuation span's
+// duration only covers the tail segment, so the merged duration/end are derived
+// from the span's own start, not the row's start.
+async function mergeContinuation(
+  supabase: ReturnType<typeof getSupabase>,
+  existing: DowntimeEvent,
+  span: OfsSpanItem,
+  allItems: OfsSpanItem[],
+): Promise<DowntimeEvent> {
+  const liveEvt = spanToEvent(span, allItems);
+  const liveDuration = span.duration ?? 0;
+  const endEpoch = liveDuration > 0 && span.start != null
+    ? span.start + liveDuration
+    : existing.end_epoch;
+  const mergedMetadata: Record<string, unknown> = {
+    ...(existing.metadata ?? {}),
+    ...(liveEvt.metadata ?? {}),
+  };
+  const merged: DowntimeEvent = {
+    ...existing,
+    span_id: span.id ?? null,
+    state: span.state ?? null,
+    end_epoch: endEpoch,
+    duration_ms: endEpoch != null ? endEpoch - existing.start_epoch : existing.duration_ms,
+    resolved: true,
+    reason: existing.reason ?? liveEvt.reason ?? null,
+    category: existing.category ?? liveEvt.category ?? null,
+    metadata: mergedMetadata,
+  };
+  const patch: Record<string, unknown> = {
+    span_id: merged.span_id,
+    state: merged.state,
+    end_epoch: merged.end_epoch,
+    duration_ms: merged.duration_ms,
+    resolved: true,
+    reason: merged.reason,
+    category: merged.category,
+    metadata: merged.metadata,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabase
+    .from("downtime_events")
+    .update(patch)
+    .eq("id", existing.id);
+  if (error) throw new Error(error.message);
+  return merged;
 }
 
 // Applies a live-feed span to an existing event row: refresh its span id,
@@ -623,6 +721,19 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
       if (raceRow) {
         const merged = await updateEventFromSpan(supabase, raceRow, span, allItems, null, true);
         if (merged) liveEvents.push(merged);
+        continue;
+      }
+    }
+
+    // A shift change can split one setup/slow event into two OFS spans: the new
+    // span starts right where the previous one ended, carries the same product,
+    // but has a different id/start. Adopt the closed row and extend it to the
+    // new span's end instead of inserting a duplicate event.
+    if (type) {
+      const continuation = await fetchContinuationRow(supabase, span, allItems);
+      if (continuation) {
+        const merged = await mergeContinuation(supabase, continuation, span, allItems);
+        liveEvents.push(merged);
         continue;
       }
     }

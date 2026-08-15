@@ -328,6 +328,125 @@ function windowsOverlap(
   return aStart <= bEndAt && bStart <= aEndAt;
 }
 
+// Fetches the live row (if any) that represents the same event as a span
+// with this start epoch + type, excluding user-corrected rows. Used right
+// before insert to adopt a row another capture run committed moments ago.
+async function fetchLiveRowByIdentity(
+  supabase: ReturnType<typeof getSupabase>,
+  start: number,
+  type: string,
+): Promise<DowntimeEvent | null> {
+  const { data, error } = await supabase
+    .from("downtime_events")
+    .select("*")
+    .eq("console_id", CONSOLE)
+    .eq("start_epoch", start)
+    .eq("downtime_type", type)
+    .eq("source", "live")
+    .eq("user_edited", false)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as DowntimeEvent | null) ?? null;
+}
+
+// Applies a live-feed span to an existing event row: refresh its span id,
+// state, category, reason, duration and metadata, resolving it once OFS
+// freezes the span duration. Returns the resulting event, or null when the
+// row was frozen (nothing more to record this poll).
+async function updateEventFromSpan(
+  supabase: ReturnType<typeof getSupabase>,
+  existing: DowntimeEvent,
+  span: OfsSpanItem,
+  allItems: OfsSpanItem[],
+  liveDuplicate: DowntimeEvent | null,
+  adopt: boolean,
+): Promise<DowntimeEvent | null> {
+  const liveDuration = span.duration ?? 0;
+
+  // OFS freezes a span's duration once it ends but may keep the span in the
+  // live feed until a newer span replaces it. A duration that is unchanged
+  // between polls (ms precision, ~5 min apart) means the event has ended —
+  // lock the row now with OFS's exact duration instead of waiting for the span
+  // to leave the feed (which could otherwise keep growing the duration on an
+  // ended span and inflate our record).
+  if (
+    !existing.resolved &&
+    existing.duration_ms != null &&
+    existing.duration_ms > 0 &&
+    liveDuration === existing.duration_ms
+  ) {
+    await supabase
+      .from("downtime_events")
+      .update({
+        resolved: true,
+        end_epoch: existing.start_epoch + liveDuration,
+        duration_ms: liveDuration,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", existing.id);
+    return null;
+  }
+
+  const liveEvt = spanToEvent(span, allItems);
+  const liveMetadata = (liveEvt.metadata ?? {}) as Record<string, unknown>;
+  const mergedMetadata: Record<string, unknown> = {
+    ...(existing.metadata ?? {}),
+    ...liveMetadata,
+  };
+  const needsUpdate =
+    adopt ||
+    (!existing.category && liveEvt.category) ||
+    (!existing.reason && liveEvt.reason) ||
+    (!existing.downtime_type && liveEvt.downtime_type) ||
+    JSON.stringify(existing.metadata) !== JSON.stringify(mergedMetadata);
+  const merged: DowntimeEvent = {
+    ...existing,
+    span_id: span.id ?? null,
+    state: span.state ?? null,
+    duration_ms: liveDuration || (existing.duration_ms ?? 0),
+    category: existing.category ?? liveEvt.category ?? null,
+    reason: existing.reason ?? liveEvt.reason ?? null,
+    downtime_type: existing.downtime_type ?? liveEvt.downtime_type ?? null,
+    metadata: mergedMetadata,
+  };
+  if (needsUpdate) {
+    const patch: Record<string, unknown> = {
+      span_id: span.id ?? null,
+      state: span.state ?? null,
+      category: merged.category,
+      reason: merged.reason,
+      downtime_type: merged.downtime_type,
+      duration_ms: merged.duration_ms,
+      metadata: merged.metadata,
+      updated_at: new Date().toISOString(),
+    };
+    if (liveDuplicate) {
+      // Migrate alert state from the superseded live row to the express row
+      // so the occurred/resolved notifications don't re-fire.
+      merged.alert_sent = liveDuplicate.alert_sent ?? merged.alert_sent ?? false;
+      merged.resolved_alert_sent =
+        liveDuplicate.resolved_alert_sent ?? merged.resolved_alert_sent ?? false;
+      merged.last_escalation_minutes =
+        liveDuplicate.last_escalation_minutes ?? merged.last_escalation_minutes ?? null;
+      patch.alert_sent = merged.alert_sent;
+      patch.resolved_alert_sent = merged.resolved_alert_sent;
+      patch.last_escalation_minutes = merged.last_escalation_minutes;
+    }
+    await supabase
+      .from("downtime_events")
+      .update(patch)
+      .eq("id", existing.id);
+  }
+  if (liveDuplicate) {
+    const { error } = await supabase
+      .from("downtime_events")
+      .delete()
+      .eq("id", liveDuplicate.id);
+    if (error) throw new Error(error.message);
+  }
+  return merged;
+}
+
 async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<CaptureResult> {
   const spans = await fetchSpans();
   const allItems = spans?.items ?? [];
@@ -487,92 +606,25 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
         }
       }
     }
-    const liveDuration = span.duration ?? 0;
-
     if (existing) {
-      // OFS freezes a span's duration once it ends but may keep the span in
-      // the live feed until a newer span replaces it. A duration that is
-      // unchanged between polls (ms precision, ~5 min apart) means the event
-      // has ended — lock the row now with OFS's exact duration instead of
-      // waiting for the span to leave the feed (which could otherwise keep
-      // growing the duration on an ended span and inflate our record).
-      if (
-        !existing.resolved &&
-        existing.duration_ms != null &&
-        existing.duration_ms > 0 &&
-        liveDuration === existing.duration_ms
-      ) {
-        await supabase
-          .from("downtime_events")
-          .update({
-            resolved: true,
-            end_epoch: existing.start_epoch + liveDuration,
-            duration_ms: liveDuration,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", existing.id);
+      const merged = await updateEventFromSpan(supabase, existing, span, allItems, liveDuplicate, adopting);
+      if (merged) liveEvents.push(merged);
+      continue;
+    }
+
+    // Another run may have captured the same event moments ago: OFS emits
+    // overlapping spans with different ids for one event, and two capture runs
+    // firing close together can both pass the in-memory identity check above
+    // before either commits. Re-check by identity (start + type) right before
+    // writing so the later run adopts the winner's row instead of inserting a
+    // duplicate.
+    if (type) {
+      const raceRow = await fetchLiveRowByIdentity(supabase, span.start!, type);
+      if (raceRow) {
+        const merged = await updateEventFromSpan(supabase, raceRow, span, allItems, null, true);
+        if (merged) liveEvents.push(merged);
         continue;
       }
-
-      const liveEvt = spanToEvent(span, allItems);
-      const liveMetadata = (liveEvt.metadata ?? {}) as Record<string, unknown>;
-      const mergedMetadata: Record<string, unknown> = {
-        ...(existing.metadata ?? {}),
-        ...liveMetadata,
-      };
-      const needsUpdate =
-        adopting ||
-        (!existing.category && liveEvt.category) ||
-        (!existing.reason && liveEvt.reason) ||
-        (!existing.downtime_type && liveEvt.downtime_type) ||
-        JSON.stringify(existing.metadata) !== JSON.stringify(mergedMetadata);
-      const merged: DowntimeEvent = {
-        ...existing,
-        span_id: span.id ?? null,
-        state: span.state ?? null,
-        duration_ms: liveDuration || (existing.duration_ms ?? 0),
-        category: existing.category ?? liveEvt.category ?? null,
-        reason: existing.reason ?? liveEvt.reason ?? null,
-        downtime_type: existing.downtime_type ?? liveEvt.downtime_type ?? null,
-        metadata: mergedMetadata,
-      };
-      if (needsUpdate) {
-        const patch: Record<string, unknown> = {
-          span_id: span.id ?? null,
-          state: span.state ?? null,
-          category: merged.category,
-          reason: merged.reason,
-          downtime_type: merged.downtime_type,
-          duration_ms: merged.duration_ms,
-          metadata: merged.metadata,
-          updated_at: new Date().toISOString(),
-        };
-        if (liveDuplicate) {
-          // Migrate alert state from the superseded live row to the express row
-          // so the occurred/resolved notifications don't re-fire.
-          merged.alert_sent = liveDuplicate.alert_sent ?? merged.alert_sent ?? false;
-          merged.resolved_alert_sent =
-            liveDuplicate.resolved_alert_sent ?? merged.resolved_alert_sent ?? false;
-          merged.last_escalation_minutes =
-            liveDuplicate.last_escalation_minutes ?? merged.last_escalation_minutes ?? null;
-          patch.alert_sent = merged.alert_sent;
-          patch.resolved_alert_sent = merged.resolved_alert_sent;
-          patch.last_escalation_minutes = merged.last_escalation_minutes;
-        }
-        await supabase
-          .from("downtime_events")
-          .update(patch)
-          .eq("id", existing.id);
-      }
-      if (liveDuplicate) {
-        const { error } = await supabase
-          .from("downtime_events")
-          .delete()
-          .eq("id", liveDuplicate.id);
-        if (error) throw new Error(error.message);
-      }
-      liveEvents.push(merged);
-      continue;
     }
 
     const record = spanToEvent(span, allItems);
@@ -581,7 +633,20 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
       .upsert(record, { onConflict: "id" })
       .select()
       .single();
-    if (error) throw new Error(error.message);
+    if (error) {
+      // The partial unique index (console_id, start_epoch, downtime_type) for
+      // live setup/slow rows serialized two racing inserts — adopt the row that
+      // won instead of surfacing the conflict.
+      if (error.code === "23505" && type) {
+        const conflictRow = await fetchLiveRowByIdentity(supabase, span.start!, type);
+        if (conflictRow) {
+          const merged = await updateEventFromSpan(supabase, conflictRow, span, allItems, null, true);
+          if (merged) liveEvents.push(merged);
+          continue;
+        }
+      }
+      throw new Error(error.message);
+    }
     liveEvents.push(inserted as unknown as DowntimeEvent);
     insertedAny = true;
   }
@@ -633,7 +698,7 @@ async function resolveGhosts(supabase: ReturnType<typeof getSupabase>): Promise<
     if (sibError) throw new Error(sibError.message);
     if (!sibling || sibling.end_epoch == null) continue;
 
-    const { error: updateError } = await supabase
+    const { error: updateError } =     await supabase
       .from("downtime_events")
       .update({
         resolved: true,
@@ -646,6 +711,58 @@ async function resolveGhosts(supabase: ReturnType<typeof getSupabase>): Promise<
     resolvedCount++;
   }
   return resolvedCount;
+}
+
+// Removes resolved duplicate live rows. OFS emits the same setup/slow event
+// under several overlapping span ids, and two capture runs firing close
+// together can each insert a row before the identity check sees the other
+// (older builds created these before the race guard). Keep the row that best
+// represents the event (resolved-alert sent > longest duration > lowest id)
+// and delete the rest. Only resolved rows are touched, so an event capture is
+// still actively tracking is never disturbed.
+async function dedupeResolvedLiveDuplicates(supabase: ReturnType<typeof getSupabase>): Promise<number> {
+  const { data: rows, error } = await supabase
+    .from("downtime_events")
+    .select("id, console_id, start_epoch, downtime_type, resolved_alert_sent, duration_ms")
+    .in("downtime_type", ["SETUP", "RUNNING_SLOW"])
+    .eq("source", "live")
+    .eq("resolved", true)
+    .eq("user_edited", false);
+  if (error) throw new Error(error.message);
+  if (!rows || rows.length < 2) return 0;
+
+  const groups = new Map<string, Array<{
+    id: number;
+    resolved_alert_sent: boolean | null;
+    duration_ms: number | null;
+  }>>();
+  for (const r of rows) {
+    const key = `${r.console_id}_${r.start_epoch}_${r.downtime_type}`;
+    const arr = groups.get(key);
+    if (arr) arr.push(r);
+    else groups.set(key, [r]);
+  }
+
+  let removed = 0;
+  for (const arr of groups.values()) {
+    if (arr.length < 2) continue;
+    arr.sort((a, b) => {
+      if (a.resolved_alert_sent !== b.resolved_alert_sent) return a.resolved_alert_sent ? -1 : 1;
+      const ad = a.duration_ms ?? 0;
+      const bd = b.duration_ms ?? 0;
+      if (ad !== bd) return bd - ad;
+      return a.id - b.id;
+    });
+    for (const dup of arr.slice(1)) {
+      const { error: delErr } = await supabase
+        .from("downtime_events")
+        .delete()
+        .eq("id", dup.id);
+      if (delErr) throw new Error(delErr.message);
+      removed++;
+    }
+  }
+  return removed;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -671,10 +788,11 @@ Deno.serve(async (req: Request) => {
     }
     const result = await captureOnce(supabase);
     const ghostsResolved = await resolveGhosts(supabase);
+    const dupesRemoved = await dedupeResolvedLiveDuplicates(supabase);
     console.log(
-      `[capture-downtime] ${new Date().toISOString()} action=${result.action} hasDowntime=${result.hasDowntime} active=${result.events.length} ghostsResolved=${ghostsResolved}`,
+      `[capture-downtime] ${new Date().toISOString()} action=${result.action} hasDowntime=${result.hasDowntime} active=${result.events.length} ghostsResolved=${ghostsResolved} dupesRemoved=${dupesRemoved}`,
     );
-    return json({ ok: true, ...result, ghostsResolved, timestamp: new Date().toISOString() });
+    return json({ ok: true, ...result, ghostsResolved, dupesRemoved, timestamp: new Date().toISOString() });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error(

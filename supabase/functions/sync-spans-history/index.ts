@@ -605,7 +605,38 @@ Deno.serve(async (req: Request) => {
           .from("downtime_events")
           .upsert(patch, { onConflict: "id" })
           .select("id");
-        if (error) throw new Error(error.message);
+        if (error) {
+          // Two writers inserted the same live event (same start + type) under
+          // different span ids; the partial unique index on live setup/slow
+          // rows made one of them fail. Adopt the winning row instead of
+          // failing the whole sync.
+          if (error.code === "23505" && rec.start_epoch != null && rec.downtime_type) {
+            const { data: conflictRow, error: conflictErr } = await supabase
+              .from("downtime_events")
+              .select("id, resolved")
+              .eq("console_id", CONSOLE)
+              .eq("start_epoch", rec.start_epoch)
+              .eq("downtime_type", rec.downtime_type)
+              .eq("user_edited", false)
+              .maybeSingle();
+            if (conflictErr) throw new Error(conflictErr.message);
+            if (conflictRow && !conflictRow.resolved) {
+              const adoptPatch = { ...patch };
+              delete (adoptPatch as { id?: number }).id;
+              const { data: upd, error: updErr } = await supabase
+                .from("downtime_events")
+                .update(adoptPatch)
+                .eq("id", conflictRow.id)
+                .select("id");
+              if (updErr) throw new Error(updErr.message);
+              upserted += upd?.length ?? 0;
+              continue;
+            }
+            // The identity is already recorded as resolved — leave it alone.
+            continue;
+          }
+          throw new Error(error.message);
+        }
         upserted += data?.length ?? 0;
       }
     }

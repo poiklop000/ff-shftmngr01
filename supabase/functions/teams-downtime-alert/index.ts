@@ -315,6 +315,10 @@ function productFact(ctx: JobContext | null): { title: string; value: string } |
   return null;
 }
 
+function isSetupType(downtimeType: string | null): boolean {
+  return (downtimeType ?? "").toUpperCase() === "SETUP";
+}
+
 // Color-code alerts by downtime type so they are visually distinguishable in Teams.
 //   UNPLANNED — Attention (red)   — unexpected breakdowns, highest urgency
 //   PLANNED    — Accent (blue)     — scheduled maintenance / planned stops
@@ -423,7 +427,7 @@ function buildOccurredMessage(
     { title: "Reason:", value: reason },
     { title: "Category:", value: category },
   ];
-  const product = productFact(ctx);
+  const product = isSetupType(evt.downtime_type) ? null : productFact(ctx);
   if (product) facts.push(product);
   facts.push({ title: "Duration so far:", value: formatDuration(durationMs) });
   facts.push({ title: "Started:", value: startTime });
@@ -493,7 +497,7 @@ function buildResolvedMessage(
     { title: "Reason:", value: reason },
     { title: "Category:", value: category },
   ];
-  const product = productFact(ctx);
+  const product = isSetupType(evt.downtime_type) ? null : productFact(ctx);
   if (product) facts.push(product);
   facts.push({ title: "Total duration:", value: formatDuration(durationMs) });
   facts.push({ title: "Started:", value: startTime });
@@ -533,7 +537,7 @@ function buildEscalationMessage(
     { title: "Reason:", value: reason },
     { title: "Category:", value: category },
   ];
-  const product = productFact(ctx);
+  const product = isSetupType(evt.downtime_type) ? null : productFact(ctx);
   if (product) facts.push(product);
   facts.push({ title: "Duration so far:", value: formatDuration(durationMs) });
   facts.push({ title: "Started:", value: startTime });

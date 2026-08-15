@@ -293,9 +293,23 @@ async function findJobContext(
   }
   if (!chosen || chosen.job_id == null) return null;
 
-  // order_name is the human-readable product label (OFS product_name holds the
-  // SKU, e.g. "P-134"); a user correction layered on the captured values wins.
-  let product: string | null = chosen.order_name ?? chosen.product_name ?? null;
+  // Show the job's human-readable name, never the SKU. The latest captured
+  // order_name for the job reflects any renames, and a user correction
+  // (job_overrides) layered on top wins — matching the Analytics jobs table.
+  let product: string | null = null;
+  if (chosen.job_id != null) {
+    let latestOrderName: string | null = null;
+    let latestT = -Infinity;
+    for (const r of rows) {
+      if (r.job_id !== chosen.job_id || !r.order_name) continue;
+      const t = new Date(r.capture_time).getTime();
+      if (t >= latestT) {
+        latestT = t;
+        latestOrderName = r.order_name;
+      }
+    }
+    product = latestOrderName;
+  }
   const { data: override } = await supabase
     .from("job_overrides")
     .select("product_name")
@@ -305,7 +319,7 @@ async function findJobContext(
 
   return {
     product,
-    orderName: chosen.order_name ?? null,
+    orderName: product,
   };
 }
 

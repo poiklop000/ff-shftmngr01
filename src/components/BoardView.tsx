@@ -95,32 +95,54 @@ function previousShiftDate(shift: Shift, date: string): string {
   return date;
 }
 
+// Calendar day that precedes the given one, used when an overnight shift's
+// window began on the previous day (Night at 18:00, 3rd at 22:00).
+function previousDayStr(date: string): string {
+  const d = new Date(`${date}T00:00:00`);
+  d.setDate(d.getDate() - 1);
+  return dateToStr(d);
+}
+
+// The clock hour at which each overnight shift window begins; 0 for shifts
+// that begin on the same calendar day.
+function shiftStartHour(shift: Shift): number {
+  if (shift === 'Night') return 18;
+  if (shift === '3rd') return 22;
+  return 0;
+}
+
 // The board has no global date/shift controls, so it works out its own shift
 // window from the live OFS status: the shift type reported by the console when
-// it matches one of the app's shifts, otherwise a time-of-day guess. The date
-// comes from the console's shift start, so overnight shifts (e.g. Night
-// starting 18:00) point at the correct starting calendar day.
+// it matches one of the app's shifts, otherwise a time-of-day guess. Overnight
+// shifts (Night starting 18:00, 3rd starting 22:00) begin before midnight the
+// day before, so once the console clock has passed midnight the window started
+// on the previous calendar day. The OFS shift start can't be trusted for the
+// date — a change of operator mid-shift restarts the OFS shift span (e.g. 01:06
+// on the 17th), which would otherwise point the table at the next day's window.
 function detectShiftContext(status: OfsLiveStatus | null): { shift: Shift; date: string } {
   const consoleTime = status?.workcentre?.consoletimeText || status?.timestampText || '';
   const shiftType = status?.shift?.type;
+  const match = consoleTime.match(/(\d{1,2}):(\d{2})/);
+  const hour = match ? parseInt(match[1], 10) : 6;
   let shift: Shift = 'Morning';
   if (shiftType && (SHIFT_LIST as string[]).includes(shiftType)) {
     shift = shiftType as Shift;
   } else {
-    const match = consoleTime.match(/(\d{1,2}):(\d{2})/);
-    const hour = match ? parseInt(match[1], 10) : 6;
     shift = hour >= 18 || hour < 6 ? 'Night' : 'Morning';
   }
   if (shift === 'Custom') shift = 'Morning';
 
-  const shiftStartDate = status?.shift?.startText?.slice(0, 10);
   const consoleDate = consoleTime.match(/^(\d{4}-\d{2}-\d{2})/)?.[1];
-  const date =
-    shiftStartDate && /^\d{4}-\d{2}-\d{2}$/.test(shiftStartDate)
-      ? shiftStartDate
-      : consoleDate && /^\d{4}-\d{2}-\d{2}$/.test(consoleDate)
-        ? consoleDate
+  const shiftStartDate = status?.shift?.startText?.slice(0, 10);
+  const baseDate =
+    consoleDate && /^\d{4}-\d{2}-\d{2}$/.test(consoleDate)
+      ? consoleDate
+      : shiftStartDate && /^\d{4}-\d{2}-\d{2}$/.test(shiftStartDate)
+        ? shiftStartDate
         : dateToStr(new Date());
+
+  const startHour = shiftStartHour(shift);
+  const date = startHour > 0 && hour < startHour ? previousDayStr(baseDate) : baseDate;
   return { shift, date };
 }
 

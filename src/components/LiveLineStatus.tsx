@@ -19,6 +19,7 @@ import { loadLiveIntervals } from '@/lib/liveConfig';
 import { fetchOfsStatus, classifyLineState, LINE_STATE_COLORS, type OfsLiveStatus, type OfsRunState, type LineStateClass } from '@/lib/ofs';
 import { loadJobOverride, saveJobOverride, deleteJobOverride, type JobOverride } from '@/lib/jobOverrides';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
+import { fetchHourlyRatedSpeeds } from '@/lib/jobSnapshots';
 import { fetchDowntimeByDate, downtimeEventEndText, type DowntimeEvent } from '@/lib/downtime';
 import { filterByShiftWindow, getActiveHours, SHIFT_LABELS, type Shift } from '@/types';
 import { DowntimeTimeline } from '@/components/DowntimeTimeline';
@@ -59,6 +60,7 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [summary, setSummary] = useState<HourlySummaryEntry[]>([]);
+  const [hourlyRatedSpeeds, setHourlyRatedSpeeds] = useState<Record<number, number>>({});
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [downtimeEvents, setDowntimeEvents] = useState<DowntimeEvent[]>([]);
@@ -124,6 +126,8 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
         data.push(...nextData);
       }
       setSummary(data);
+      const rated = await fetchHourlyRatedSpeeds(date, currentShift, customHours);
+      setHourlyRatedSpeeds(rated);
     } catch (err) {
       setSummaryError(err instanceof Error ? err.message : 'Failed to load production summary');
       setSummary([]);
@@ -220,9 +224,26 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
 
   // Each OFS hourly entry is labelled with the hour it starts at, so the 18:00
   // bucket is the output produced between 18:00 and 19:00. Show it as a range.
+  // Map each shift-hour label (e.g. "18:00") to its per-job rated speed so the
+  // production table shows the correct speed for every hour instead of the
+  // single current-job speed.
+  const hourRatedSpeedMap = useMemo(() => {
+    const hours = getActiveHours(currentShift, customHours);
+    const map = new Map<string, number>();
+    for (const [idx, speed] of Object.entries(hourlyRatedSpeeds)) {
+      const hourLabel = hours[parseInt(idx)]?.split(' - ')[0]?.trim();
+      if (hourLabel && speed > 0) map.set(hourLabel, speed);
+    }
+    return map;
+  }, [hourlyRatedSpeeds, currentShift, customHours]);
+
   const productionRows = useMemo(
-    () => shiftSummary.map((e) => ({ hour: hourRangeLabel(e.hour), output: e.in })),
-    [shiftSummary],
+    () => shiftSummary.map((e) => ({
+      hour: hourRangeLabel(e.hour),
+      output: e.in,
+      ratedSpeed: hourRatedSpeedMap.get(e.hour?.trim() ?? '') ?? 0,
+    })),
+    [shiftSummary, hourRatedSpeedMap],
   );
 
   const shiftDowntimeEvents = useMemo(
@@ -655,17 +676,17 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
                     {productionRows.map((row, i) => (
                       <tr key={i} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
                         <td className="px-4 py-3 text-center font-medium text-slate-700 whitespace-nowrap">{row.hour}</td>
-                        <td className="px-4 py-3 text-center font-semibold text-slate-700 whitespace-nowrap">{ratedSpeed > 0 ? ratedSpeed.toLocaleString() : '-'}</td>
+                        <td className="px-4 py-3 text-center font-semibold text-slate-700 whitespace-nowrap">{row.ratedSpeed > 0 ? row.ratedSpeed.toLocaleString() : '-'}</td>
                         <td className="px-4 py-3 text-center font-semibold text-slate-700 whitespace-nowrap">{row.output.toLocaleString()}</td>
                         <td className="px-4 py-3 text-center whitespace-nowrap">
                           {(() => {
-                            const oee = ratedSpeed > 0 ? (row.output / ratedSpeed) * 100 : 0;
-                            const oeeClass = ratedSpeed > 0
+                            const oee = row.ratedSpeed > 0 ? (row.output / row.ratedSpeed) * 100 : 0;
+                            const oeeClass = row.ratedSpeed > 0
                               ? oee >= 70 ? 'oee-pass' : 'oee-fail'
                               : 'oee-neutral';
                             return (
                               <span className={`oee-badge ${oeeClass}`}>
-                                {ratedSpeed > 0 ? `${oee.toFixed(2)}%` : '0.00%'}
+                                {row.ratedSpeed > 0 ? `${oee.toFixed(2)}%` : '0.00%'}
                               </span>
                             );
                           })()}

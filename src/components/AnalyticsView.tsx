@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, Loader2, FileDown, RefreshCw, Calendar, Clock, MessageSquare, Pencil, Check, X, RotateCcw, AlertTriangle } from 'lucide-react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BarChart3, Loader2, FileDown, RefreshCw, Calendar, Clock, MessageSquare, Pencil, Check, X, RotateCcw, AlertTriangle, Sparkles } from 'lucide-react';
 import { PageHelp } from '@/components/PageHelp';
 import { CheckboxDropdown } from '@/components/CheckboxDropdown';
 import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
@@ -12,6 +12,7 @@ import {
   type JobSnapshotRow,
 } from '@/lib/analytics';
 import { fetchOverridesForJobs, saveJobOverride, deleteJobOverride, type JobOverride } from '@/lib/jobOverrides';
+import { fetchAiSummary } from '@/lib/aiSummary';
 
 function csvEscape(value: string | number | null | undefined): string {
   const str = String(value ?? '');
@@ -290,6 +291,11 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
   const [draftSpeed, setDraftSpeed] = useState('');
   const [overrideSaving, setOverrideSaving] = useState(false);
   const [overrideError, setOverrideError] = useState<string | null>(null);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [aiMode, setAiMode] = useState<'brief' | 'detailed'>('brief');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Keep the Analytics filters and last loaded range in localStorage so the
   // page remembers them when the user navigates away and comes back.
@@ -319,6 +325,8 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
     setLoading(true);
     setError(null);
     setMsg(null);
+    setAiSummary(null);
+    setAiError(null);
     try {
       const startDay = start.slice(0, 10);
       const endDay = end.slice(0, 10);
@@ -628,6 +636,83 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
     setMsg('CSV exported');
   };
 
+  const handleAiSummary = useCallback(async (mode: 'brief' | 'detailed') => {
+    if (!data || !loadedRange) return;
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setAiMode(mode);
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      // Build downtime-by-type from filtered downtime events
+      const typeMap = new Map<string, { ms: number; count: number }>();
+      for (const e of downtime) {
+        const t = e.downtime_type ?? 'UNKNOWN';
+        const entry = typeMap.get(t) ?? { ms: 0, count: 0 };
+        entry.ms += e.duration_ms ?? 0;
+        entry.count += 1;
+        typeMap.set(t, entry);
+      }
+      const downtimeByType = Array.from(typeMap.entries())
+        .map(([type, { ms, count }]) => ({ type, ms, count }));
+
+      // Build hourly production from visible range
+      const hourlyProduction = visibleHourly.map((h) => ({
+        hour: h.startText ? h.startText.slice(0, 16).replace('T', ' ') : h.hour,
+        in: h.in,
+        out: h.out,
+        rated: hourJobRates[h.start] ?? h.rated,
+      }));
+
+      // Unique jobs with latest produced/target from snapshots
+      const jobs = visibleJobs.map((j) => ({
+        jobId: j.jobId,
+        product: j.product,
+        ratedSpeed: j.ratedSpeed,
+        target: j.quantity,
+        produced: j.produced,
+        progressPct: j.progressPct,
+      }));
+
+      // Top 10 longest downtime events with operator comments
+      const topDowntimeEvents = [...downtime]
+        .sort((a, b) => (b.duration_ms ?? 0) - (a.duration_ms ?? 0))
+        .slice(0, 10)
+        .map((e) => ({
+          durationMs: e.duration_ms ?? 0,
+          type: e.downtime_type ?? 'UNKNOWN',
+          category: e.category ?? e.reason ?? 'Unknown',
+          reason: e.reason ?? '',
+          comments: (e.comments ?? [])
+            .filter((c) => !c.systemPost)
+            .map((c) => ({ author: c.userName, text: c.text })),
+        }));
+
+      const summary = await fetchAiSummary({
+        mode,
+        rangeStart: loadedRange.start.replace('T', ' '),
+        rangeEnd: loadedRange.end.replace('T', ' '),
+        totalDowntimeMs,
+        downtimeCount,
+        longestDowntimeMs,
+        uptimePct,
+        totalOut,
+        avgEfficiency,
+        jobs,
+        downtimeByType,
+        downtimeByCategory,
+        hourlyProduction,
+        topDowntimeEvents,
+      });
+      if (!ctrl.signal.aborted) setAiSummary(summary);
+    } catch (err) {
+      if (!ctrl.signal.aborted) setAiError(err instanceof Error ? err.message : 'Failed to generate summary');
+    } finally {
+      if (!ctrl.signal.aborted) setAiLoading(false);
+    }
+  }, [data, loadedRange, downtime, visibleJobs, visibleHourly, hourJobRates, overrides, totalDowntimeMs, downtimeCount, longestDowntimeMs, uptimePct, totalOut, avgEfficiency, downtimeByCategory]);
+
   const isLoading = loading;
   const hasData = !!data;
 
@@ -773,6 +858,56 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
             <div className="card card-teal">
               <div className="card-row stat-row"><span>Uptime (est.):</span><span className="card-value">{uptimePct.toFixed(1)}%</span></div>
             </div>
+          </div>
+
+          {/* AI Summary */}
+          <div className="card card-purple">
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0, paddingBottom: 8, borderBottom: '1px solid currentColor' }}>
+              <Sparkles size={16} style={{ opacity: 0.7 }} />
+              <span style={{ fontSize: 14, fontWeight: 700 }}>AI Summary</span>
+            </h3>
+
+            {!aiSummary && !aiLoading && !aiError && (
+              <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>Generate a summary for this data range:</span>
+                <button type="button" className="tab-btn tab-btn-purple" onClick={() => handleAiSummary('brief')} disabled={aiLoading}>
+                  Brief
+                </button>
+                <button type="button" className="tab-btn tab-btn-purple" style={{ opacity: 0.85 }} onClick={() => handleAiSummary('detailed')} disabled={aiLoading}>
+                  Detailed
+                </button>
+              </div>
+            )}
+
+            {aiLoading && (
+              <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600 }}>
+                <Loader2 size={14} className="animate-spin" />
+                Generating {aiMode} summary...
+              </div>
+            )}
+
+            {aiError && (
+              <div className="ai-error" style={{ marginTop: 10, padding: '8px 12px', borderRadius: 6, background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', fontSize: 12, fontWeight: 600 }}>
+                {aiError}
+                <button type="button" style={{ marginLeft: 10, background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', fontSize: 12, fontWeight: 600 }} onClick={() => { setAiError(null); setAiSummary(null); }}>Dismiss</button>
+              </div>
+            )}
+
+            {aiSummary && !aiLoading && (
+              <>
+                <div style={{ marginTop: 10, whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.65 }}>
+                  {aiSummary}
+                </div>
+                <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <button type="button" className="tab-btn tab-btn-purple" onClick={() => handleAiSummary(aiMode)} disabled={aiLoading}>
+                    <RefreshCw size={11} style={{ marginRight: 4 }} /> Regenerate
+                  </button>
+                  <button type="button" className="tab-btn tab-btn-purple-outline" onClick={() => handleAiSummary(aiMode === 'brief' ? 'detailed' : 'brief')} disabled={aiLoading}>
+                    Switch to {aiMode === 'brief' ? 'Detailed' : 'Brief'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Jobs */}

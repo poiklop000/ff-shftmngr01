@@ -1051,8 +1051,8 @@ html[data-theme='dark'] .yield-green { color: #86efac !important; }
 
 /* ---- iOS zoom prevention: inputs < 16px trigger auto-zoom ---- */
 @media (max-width: 768px) {
-  .sm-container .form-control { font-size: 22px !important; }
-  .sm-container select.form-control { font-size: 22px !important; }
+  .sm-container .form-control { font-size: 16px !important; }
+  .sm-container select.form-control { font-size: 16px !important; }
 }
 
 /* ---- Live counter table ---- */

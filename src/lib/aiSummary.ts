@@ -1,13 +1,15 @@
 import { supabase } from '@/lib/supabase';
 
 const FUNCTIONS_BASE = import.meta.env.VITE_SUPABASE_URL + '/functions/v1';
-const GEMINI_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent';
+const GEMINI_BASE =
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash';
+const GEMINI_STREAM_URL = `${GEMINI_BASE}:streamGenerateContent?alt=sse`;
+const GEMINI_URL = `${GEMINI_BASE}:generateContent`;
 
-// Local dev calls Gemini directly from the browser (no edge function needed).
 const IS_LOCAL =
   typeof window !== 'undefined' &&
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  (window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1');
 
 interface JobStat {
   jobId: number;
@@ -67,6 +69,11 @@ export interface AiSummaryPayload {
   topDowntimeEvents: TopDowntimeEvent[];
 }
 
+export interface ChatMessage {
+  role: 'user' | 'model';
+  content: string;
+}
+
 function fmtDuration(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
   const h = Math.floor(totalSec / 3600);
@@ -75,7 +82,7 @@ function fmtDuration(ms: number): string {
   return `${m}m`;
 }
 
-function buildPrompt(s: AiSummaryPayload): string {
+export function buildPrompt(s: AiSummaryPayload): string {
   const parts: string[] = [];
   parts.push(
     'You are a factory production analyst for a canning line in New Zealand.',
@@ -209,7 +216,11 @@ function buildPrompt(s: AiSummaryPayload): string {
   return parts.join('\n');
 }
 
-async function callGeminiDirect(prompt: string, mode: string): Promise<string> {
+// ---------------------------------------------------------------------------
+// Gemini direct calls (local dev)
+// ---------------------------------------------------------------------------
+
+async function callGeminiDirect(prompt: string, _mode: string): Promise<string> {
   const key = import.meta.env.VITE_GEMINI_API_KEY;
   if (!key) {
     throw new Error(
@@ -222,16 +233,13 @@ async function callGeminiDirect(prompt: string, mode: string): Promise<string> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.4,
-      },
+      generationConfig: { temperature: 0.4 },
     }),
   });
 
   if (res.status === 429) {
     throw new Error('Rate limited — wait 60 seconds before trying again.');
   }
-
   if (!res.ok) {
     const errBody = await res.text();
     throw new Error(`Gemini API error ${res.status}: ${errBody}`);
@@ -242,6 +250,69 @@ async function callGeminiDirect(prompt: string, mode: string): Promise<string> {
   if (!text) throw new Error('Gemini returned an empty response');
   return text;
 }
+
+// ---------------------------------------------------------------------------
+// Streaming — yields text chunks via an async generator
+// ---------------------------------------------------------------------------
+
+async function* streamGeminiDirect(
+  contents: { role: string; parts: { text: string }[] }[],
+): AsyncGenerator<string> {
+  const key = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!key) {
+    throw new Error('VITE_GEMINI_API_KEY not set in .env');
+  }
+
+  const res = await fetch(`${GEMINI_STREAM_URL}&key=${key}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents,
+      generationConfig: { temperature: 0.4 },
+    }),
+  });
+
+  if (res.status === 429) {
+    throw new Error('Rate limited — wait 60 seconds before trying again.');
+  }
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Gemini API error ${res.status}: ${errBody}`);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('No response body');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const jsonStr = line.slice(6).trim();
+      if (!jsonStr || jsonStr === '[DONE]') continue;
+      try {
+        const chunk = JSON.parse(jsonStr);
+        const text =
+          chunk?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+        if (text) yield text;
+      } catch {
+        // skip malformed chunks
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Edge function calls (production)
+// ---------------------------------------------------------------------------
 
 async function callEdgeFunction(
   payload: AiSummaryPayload,
@@ -262,7 +333,6 @@ async function callEdgeFunction(
   if (res.status === 429) {
     throw new Error('Rate limited — wait 60 seconds before trying again.');
   }
-
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.error ?? `AI summary failed (${res.status})`);
@@ -272,14 +342,135 @@ async function callEdgeFunction(
   return body.summary as string;
 }
 
+async function* streamEdgeFunction(
+  contents: { role: string; parts: { text: string }[] }[],
+): AsyncGenerator<string> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) throw new Error('Not authenticated');
+
+  const res = await fetch(`${FUNCTIONS_BASE}/ai-summarize-stream`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ contents }),
+  });
+
+  if (res.status === 429) {
+    throw new Error('Rate limited — wait 60 seconds before trying again.');
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `AI summary failed (${res.status})`);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('No response body');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const jsonStr = line.slice(6).trim();
+      if (!jsonStr || jsonStr === '[DONE]') continue;
+      try {
+        const chunk = JSON.parse(jsonStr);
+        const text =
+          chunk?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+        if (text) yield text;
+      } catch {
+        // skip
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/** Non-streaming summary (legacy, still used as fallback). */
 export async function fetchAiSummary(
   payload: AiSummaryPayload,
 ): Promise<string> {
   if (IS_LOCAL) {
-    // Local dev: call Gemini directly, no edge function needed
     const prompt = buildPrompt(payload);
     return callGeminiDirect(prompt, payload.mode);
   }
-  // Production: use the edge function (API key stays server-side)
   return callEdgeFunction(payload);
+}
+
+/** Streaming summary — yields text chunks as Gemini generates them. */
+export async function* fetchAiSummaryStream(
+  payload: AiSummaryPayload,
+): AsyncGenerator<string> {
+  const prompt = buildPrompt(payload);
+  const contents = [{ role: 'user', parts: [{ text: prompt }] }];
+
+  if (IS_LOCAL) {
+    yield* streamGeminiDirect(contents);
+  } else {
+    yield* streamEdgeFunction(contents);
+  }
+}
+
+/** Send a follow-up chat message with full conversation history. */
+export async function* sendAiChatMessage(
+  payload: AiSummaryPayload,
+  history: ChatMessage[],
+  userMessage: string,
+): AsyncGenerator<string> {
+  const dataContext = `[Production data context — do not repeat this data unless asked]\nDate range: ${payload.rangeStart} to ${payload.rangeEnd}\nTotal output: ${payload.totalOut.toLocaleString()} units\nAvg efficiency: ${payload.avgEfficiency.toFixed(1)}%\nUptime: ${payload.uptimePct.toFixed(1)}%\nDowntime: ${fmtDuration(payload.totalDowntimeMs)} across ${payload.downtimeCount} events\nJobs: ${payload.jobs.map((j) => `Job ${j.jobId} (${j.product}) ${j.produced}/${j.target}`).join('; ')}`;
+
+  const contents: { role: string; parts: { text: string }[] }[] = [
+    { role: 'user', parts: [{ text: dataContext }] },
+    {
+      role: 'model',
+      parts: [
+        {
+          text: 'Understood. I have the production data context. Ask me anything about this data.',
+        },
+      ],
+    },
+  ];
+
+  for (const msg of history) {
+    contents.push({ role: msg.role, parts: [{ text: msg.content }] });
+  }
+  contents.push({ role: 'user', parts: [{ text: userMessage }] });
+
+  if (IS_LOCAL) {
+    yield* streamGeminiDirect(contents);
+  } else {
+    yield* streamEdgeFunction(contents);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Export helpers
+// ---------------------------------------------------------------------------
+
+export function copySummaryToClipboard(text: string): Promise<void> {
+  return navigator.clipboard.writeText(text);
+}
+
+export function downloadSummaryTxt(text: string, label: string) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ai_summary_${label}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
 }

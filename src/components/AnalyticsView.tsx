@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Loader2, FileDown, RefreshCw, Calendar, Clock, MessageSquare, Pencil, Check, X, RotateCcw, AlertTriangle, Sparkles } from 'lucide-react';
+import { BarChart3, Loader2, FileDown, RefreshCw, Calendar, Clock, MessageSquare, Pencil, Check, X, RotateCcw, AlertTriangle, Sparkles, Copy, Download, Send } from 'lucide-react';
 import { PageHelp } from '@/components/PageHelp';
 import { CheckboxDropdown } from '@/components/CheckboxDropdown';
 import { DowntimeTypeBadge } from '@/components/DowntimeTypeBadge';
@@ -12,7 +12,7 @@ import {
   type JobSnapshotRow,
 } from '@/lib/analytics';
 import { fetchOverridesForJobs, saveJobOverride, deleteJobOverride, type JobOverride } from '@/lib/jobOverrides';
-import { fetchAiSummary } from '@/lib/aiSummary';
+import { fetchAiSummaryStream, sendAiChatMessage, copySummaryToClipboard, downloadSummaryTxt, buildPrompt, type ChatMessage, type AiSummaryPayload } from '@/lib/aiSummary';
 import type { Role } from '@/lib/auth';
 
 function csvEscape(value: string | number | null | undefined): string {
@@ -298,8 +298,13 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiCooldown, setAiCooldown] = useState(0);
+  const [aiMessages, setAiMessages] = useState<ChatMessage[]>([]);
+  const [aiChatInput, setAiChatInput] = useState('');
+  const [aiChatLoading, setAiChatLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const summaryPayloadRef = useRef<AiSummaryPayload | null>(null);
 
   // Keep the Analytics filters and last loaded range in localStorage so the
   // page remembers them when the user navigates away and comes back.
@@ -654,90 +659,120 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
     }, 1000);
   }, []);
 
-  const handleAiSummary = useCallback(async (mode: 'brief' | 'detailed') => {
+  const buildPayload = useCallback((): AiSummaryPayload | null => {
+    if (!data || !loadedRange) return null;
+    const typeMap = new Map<string, { ms: number; count: number }>();
+    for (const e of downtime) {
+      const t = e.downtime_type ?? 'UNKNOWN';
+      const entry = typeMap.get(t) ?? { ms: 0, count: 0 };
+      entry.ms += e.duration_ms ?? 0;
+      entry.count += 1;
+      typeMap.set(t, entry);
+    }
+    const downtimeByType = Array.from(typeMap.entries())
+      .map(([type, { ms, count }]) => ({ type, ms, count }));
+    const hourlyProduction = visibleHourly.map((h) => ({
+      hour: h.startText ? h.startText.slice(0, 16).replace('T', ' ') : h.hour,
+      in: h.in, out: h.out, rated: hourJobRates[h.start] ?? h.rated,
+    }));
+    const jobs = visibleJobs.map((j) => ({
+      jobId: j.jobId, product: j.product, ratedSpeed: j.ratedSpeed,
+      target: j.quantity, produced: j.produced, progressPct: j.progressPct,
+    }));
+    const topDowntimeEvents = [...downtime]
+      .sort((a, b) => (b.duration_ms ?? 0) - (a.duration_ms ?? 0))
+      .slice(0, 10)
+      .map((e) => ({
+        durationMs: e.duration_ms ?? 0,
+        type: e.downtime_type ?? 'UNKNOWN',
+        category: e.category ?? e.reason ?? 'Unknown',
+        reason: e.reason ?? '',
+        comments: (e.comments ?? [])
+          .filter((c) => !c.systemPost)
+          .map((c) => ({ author: c.userName, text: c.text })),
+      }));
+    return {
+      mode: aiMode, rangeStart: loadedRange.start.replace('T', ' '),
+      rangeEnd: loadedRange.end.replace('T', ' '),
+      totalDowntimeMs, downtimeCount, longestDowntimeMs, uptimePct,
+      totalOut, avgEfficiency, jobs, downtimeByType, downtimeByCategory,
+      hourlyProduction, topDowntimeEvents,
+    };
+  }, [data, loadedRange, downtime, visibleJobs, visibleHourly, hourJobRates, totalDowntimeMs, downtimeCount, longestDowntimeMs, uptimePct, totalOut, avgEfficiency, downtimeByCategory, aiMode]);
+
+  const handleAiSummary = useCallback(async (newMode: 'brief' | 'detailed') => {
     if (!data || !loadedRange) return;
     if (aiCooldown > 0) return;
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    setAiMode(mode);
+    setAiMode(newMode);
     setAiLoading(true);
     setAiError(null);
+    setAiSummary(null);
+    setAiMessages([]);
     try {
-      // Build downtime-by-type from filtered downtime events
-      const typeMap = new Map<string, { ms: number; count: number }>();
-      for (const e of downtime) {
-        const t = e.downtime_type ?? 'UNKNOWN';
-        const entry = typeMap.get(t) ?? { ms: 0, count: 0 };
-        entry.ms += e.duration_ms ?? 0;
-        entry.count += 1;
-        typeMap.set(t, entry);
+      const payload = buildPayload();
+      if (!payload) return;
+      payload.mode = newMode;
+      summaryPayloadRef.current = payload;
+      let text = '';
+      for await (const chunk of fetchAiSummaryStream(payload)) {
+        if (ctrl.signal.aborted) break;
+        text += chunk;
+        setAiSummary(text);
       }
-      const downtimeByType = Array.from(typeMap.entries())
-        .map(([type, { ms, count }]) => ({ type, ms, count }));
-
-      // Build hourly production from visible range
-      const hourlyProduction = visibleHourly.map((h) => ({
-        hour: h.startText ? h.startText.slice(0, 16).replace('T', ' ') : h.hour,
-        in: h.in,
-        out: h.out,
-        rated: hourJobRates[h.start] ?? h.rated,
-      }));
-
-      // Unique jobs with latest produced/target from snapshots
-      const jobs = visibleJobs.map((j) => ({
-        jobId: j.jobId,
-        product: j.product,
-        ratedSpeed: j.ratedSpeed,
-        target: j.quantity,
-        produced: j.produced,
-        progressPct: j.progressPct,
-      }));
-
-      // Top 10 longest downtime events with operator comments
-      const topDowntimeEvents = [...downtime]
-        .sort((a, b) => (b.duration_ms ?? 0) - (a.duration_ms ?? 0))
-        .slice(0, 10)
-        .map((e) => ({
-          durationMs: e.duration_ms ?? 0,
-          type: e.downtime_type ?? 'UNKNOWN',
-          category: e.category ?? e.reason ?? 'Unknown',
-          reason: e.reason ?? '',
-          comments: (e.comments ?? [])
-            .filter((c) => !c.systemPost)
-            .map((c) => ({ author: c.userName, text: c.text })),
-        }));
-
-      const summary = await fetchAiSummary({
-        mode,
-        rangeStart: loadedRange.start.replace('T', ' '),
-        rangeEnd: loadedRange.end.replace('T', ' '),
-        totalDowntimeMs,
-        downtimeCount,
-        longestDowntimeMs,
-        uptimePct,
-        totalOut,
-        avgEfficiency,
-        jobs,
-        downtimeByType,
-        downtimeByCategory,
-        hourlyProduction,
-        topDowntimeEvents,
-      });
-      if (!ctrl.signal.aborted) {
-        setAiSummary(summary);
-        startCooldown(5);
-      }
+      if (!ctrl.signal.aborted) startCooldown(5);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to generate summary';
       if (!ctrl.signal.aborted) setAiError(msg);
-      if (msg.includes('429') || msg.includes('Rate limited')) {
-        startCooldown(60);
-      }
+      if (msg.includes('429') || msg.includes('Rate limited')) startCooldown(60);
     } finally {
       if (!ctrl.signal.aborted) setAiLoading(false);
     }
-  }, [data, loadedRange, downtime, visibleJobs, visibleHourly, hourJobRates, overrides, totalDowntimeMs, downtimeCount, longestDowntimeMs, uptimePct, totalOut, avgEfficiency, downtimeByCategory, startCooldown]);
+  }, [data, loadedRange, aiCooldown, buildPayload, startCooldown]);
+
+  const handleAiChat = useCallback(async () => {
+    const payload = summaryPayloadRef.current;
+    if (!payload || !aiChatInput.trim()) return;
+    if (aiCooldown > 0 || aiChatLoading) return;
+    const userMsg = aiChatInput.trim();
+    setAiChatInput('');
+    setAiChatLoading(true);
+    setAiError(null);
+    const newMessages: ChatMessage[] = [...aiMessages, { role: 'user', content: userMsg }];
+    setAiMessages(newMessages);
+    setAiMessages([...newMessages, { role: 'model', content: '' }]);
+    try {
+      let reply = '';
+      for await (const chunk of sendAiChatMessage(payload, aiMessages, userMsg)) {
+        reply += chunk;
+        setAiMessages([...newMessages, { role: 'model', content: reply }]);
+      }
+      startCooldown(3);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Chat failed';
+      setAiError(msg);
+      if (msg.includes('429') || msg.includes('Rate limited')) startCooldown(60);
+    } finally {
+      setAiChatLoading(false);
+    }
+  }, [aiChatInput, aiMessages, aiCooldown, aiChatLoading, startCooldown]);
+
+  const handleCopySummary = useCallback(async () => {
+    if (!aiSummary) return;
+    const header = `AI Summary — ${loadedRange?.start ?? ''} to ${loadedRange?.end ?? ''}\nMode: ${aiMode}\n\n`;
+    await copySummaryToClipboard(header + aiSummary);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [aiSummary, loadedRange, aiMode]);
+
+  const handleDownloadSummary = useCallback(() => {
+    if (!aiSummary) return;
+    const header = `AI Summary — ${loadedRange?.start ?? ''} to ${loadedRange?.end ?? ''}\nMode: ${aiMode}\n\n`;
+    const label = loadedRange ? `${loadedRange.start}_to_${loadedRange.end}` : 'summary';
+    downloadSummaryTxt(header + aiSummary, label);
+  }, [aiSummary, loadedRange, aiMode]);
 
   const isLoading = loading;
   const hasData = !!data;
@@ -912,6 +947,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
               <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600 }}>
                 <Loader2 size={14} className="animate-spin" />
                 Generating {aiMode} summary...
+                {aiSummary && <span style={{ opacity: 0.6, fontWeight: 400 }}>(streaming)</span>}
               </div>
             )}
 
@@ -923,18 +959,56 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
               </div>
             )}
 
-            {aiSummary && !aiLoading && (
+            {aiSummary && (
               <>
                 <div style={{ marginTop: 10, whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.65 }}>
                   {aiSummary}
+                  {aiLoading && <span className="animate-pulse" style={{ display: 'inline-block', width: 6, height: 14, backgroundColor: '#7c3aed', marginLeft: 2, borderRadius: 2, verticalAlign: 'text-bottom' }} />}
                 </div>
-                <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+
+                {/* Action buttons */}
+                <div style={{ marginTop: 10, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                   <button type="button" className="tab-btn tab-btn-purple" onClick={() => handleAiSummary(aiMode)} disabled={aiLoading || aiCooldown > 0}>
                     <RefreshCw size={11} style={{ marginRight: 4 }} /> {aiCooldown > 0 ? `Retry in ${aiCooldown}s` : 'Regenerate'}
                   </button>
                   <button type="button" className="tab-btn tab-btn-purple-outline" onClick={() => handleAiSummary(aiMode === 'brief' ? 'detailed' : 'brief')} disabled={aiLoading || aiCooldown > 0}>
                     Switch to {aiMode === 'brief' ? 'Detailed' : 'Brief'}
                   </button>
+                  <button type="button" className="tab-btn tab-btn-purple-outline" onClick={handleCopySummary} disabled={aiLoading}>
+                    {copied ? <><Check size={11} style={{ marginRight: 4 }} /> Copied</> : <><Copy size={11} style={{ marginRight: 4 }} /> Copy</>}
+                  </button>
+                  <button type="button" className="tab-btn tab-btn-purple-outline" onClick={handleDownloadSummary} disabled={aiLoading}>
+                    <Download size={11} style={{ marginRight: 4 }} /> Download
+                  </button>
+                </div>
+
+                {/* Chat follow-up */}
+                <div style={{ marginTop: 14, borderTop: '1px solid currentColor', paddingTop: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.3px', opacity: 0.6, marginBottom: 6 }}>Follow-up questions</div>
+                  {aiMessages.length > 0 && (
+                    <div style={{ maxHeight: 200, overflowY: 'auto', marginBottom: 8 }}>
+                      {aiMessages.map((m, i) => (
+                        <div key={i} style={{ fontSize: 12, marginBottom: 4, padding: '4px 8px', borderRadius: 6, backgroundColor: m.role === 'user' ? 'rgba(124,58,237,0.1)' : 'rgba(124,58,237,0.05)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                          <span style={{ fontWeight: 700, opacity: 0.5, fontSize: 10 }}>{m.role === 'user' ? 'You' : 'AI'}</span>
+                          <span style={{ whiteSpace: 'pre-wrap' }}>{m.content || '...'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input
+                      type="text"
+                      value={aiChatInput}
+                      onChange={(e) => setAiChatInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAiChat(); } }}
+                      placeholder="e.g. What caused the most downtime on Tuesday?"
+                      disabled={aiChatLoading || aiCooldown > 0}
+                      style={{ flex: 1, fontSize: 12, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(124,58,237,0.3)', backgroundColor: 'rgba(255,255,255,0.5)', color: 'inherit', outline: 'none' }}
+                    />
+                    <button type="button" className="tab-btn tab-btn-purple" onClick={handleAiChat} disabled={aiChatLoading || aiCooldown > 0 || !aiChatInput.trim()} style={{ padding: '6px 12px' }}>
+                      {aiChatLoading ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                    </button>
+                  </div>
                 </div>
               </>
             )}

@@ -199,6 +199,10 @@ interface AnalyticsPersistState {
   typeFilters: string[];
   jobFilters: number[];
   loadedRange: { start: string; end: string } | null;
+  aiSummary: string | null;
+  aiMessages: ChatMessage[];
+  aiMode: 'brief' | 'detailed';
+  aiModel: AiModelId;
 }
 
 function defaultAnalyticsPersist(): AnalyticsPersistState {
@@ -209,6 +213,10 @@ function defaultAnalyticsPersist(): AnalyticsPersistState {
     typeFilters: [],
     jobFilters: [],
     loadedRange: null,
+    aiSummary: null,
+    aiMessages: [],
+    aiMode: 'brief',
+    aiModel: 'gemini-3.5-flash-lite',
   };
 }
 
@@ -234,6 +242,10 @@ function loadAnalyticsPersist(): AnalyticsPersistState {
         typeof parsed.loadedRange.end === 'string'
           ? parsed.loadedRange
           : null,
+      aiSummary: typeof parsed.aiSummary === 'string' ? parsed.aiSummary : null,
+      aiMessages: Array.isArray(parsed.aiMessages) ? parsed.aiMessages : [],
+      aiMode: parsed.aiMode === 'brief' || parsed.aiMode === 'detailed' ? parsed.aiMode : 'brief',
+      aiModel: typeof parsed.aiModel === 'string' ? parsed.aiModel as AiModelId : fallback.aiModel,
     };
   } catch {
     return defaultAnalyticsPersist();
@@ -295,13 +307,13 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
   const [draftSpeed, setDraftSpeed] = useState('');
   const [overrideSaving, setOverrideSaving] = useState(false);
   const [overrideError, setOverrideError] = useState<string | null>(null);
-  const [aiSummary, setAiSummary] = useState<string | null>(null);
-  const [aiMode, setAiMode] = useState<'brief' | 'detailed'>('brief');
-  const [aiModel, setAiModel] = useState<AiModelId>('gemini-3.5-flash-lite');
+  const [aiSummary, setAiSummary] = useState<string | null>(persisted.aiSummary);
+  const [aiMode, setAiMode] = useState<'brief' | 'detailed'>(persisted.aiMode);
+  const [aiModel, setAiModel] = useState<AiModelId>(persisted.aiModel);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiCooldown, setAiCooldown] = useState(0);
-  const [aiMessages, setAiMessages] = useState<ChatMessage[]>([]);
+  const [aiMessages, setAiMessages] = useState<ChatMessage[]>(persisted.aiMessages);
   const [aiChatInput, setAiChatInput] = useState('');
   const [aiChatLoading, setAiChatLoading] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -313,11 +325,14 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
   // page remembers them when the user navigates away and comes back.
   useEffect(() => {
     try {
-      localStorage.setItem(ANALYTICS_PERSIST_KEY, JSON.stringify({ startAt, endAt, textFilter, typeFilters, jobFilters, loadedRange }));
+      const state = { startAt, endAt, textFilter, typeFilters, jobFilters, loadedRange, aiSummary, aiMessages, aiMode, aiModel };
+      const json = JSON.stringify(state);
+      if (json.length > 400000) return;
+      localStorage.setItem(ANALYTICS_PERSIST_KEY, json);
     } catch {
       // ignore storage failures
     }
-  }, [startAt, endAt, textFilter, typeFilters, jobFilters, loadedRange]);
+  }, [startAt, endAt, textFilter, typeFilters, jobFilters, loadedRange, aiSummary, aiMessages, aiMode, aiModel]);
 
   useEffect(() => {
     loadAiModel().then(setAiModel).catch(() => {});
@@ -341,7 +356,12 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
     setLoading(true);
     setError(null);
     setMsg(null);
-    setAiSummary(null);
+    const rangeChanged = !loadedRange || loadedRange.start !== start || loadedRange.end !== end;
+    if (rangeChanged) {
+      setAiSummary(null);
+      setAiError(null);
+      setAiMessages([]);
+    }
     setAiError(null);
     try {
       const startDay = start.slice(0, 10);
@@ -383,7 +403,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadedRange]);
 
   // Restore the previously loaded range (if any) automatically on mount so
   // returning to Analytics shows the same data without re-selecting a range.

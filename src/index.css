@@ -1049,7 +1049,7 @@ html[data-theme='dark'] .yield-green { color: #86efac !important; }
 
 /* ---- Calculator sticky summary ---- */
 .calc-layout { display: flex; flex-direction: column; gap: 10px; }
-.calc-summary { position: sticky; top: 0; z-index: 10; }
+.calc-summary { position: sticky; top: 60px; z-index: 10; }
 .calc-scroll { display: flex; flex-direction: column; gap: 10px; }
 
 /* ---- iOS zoom prevention: inputs < 16px trigger auto-zoom ---- */

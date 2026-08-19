@@ -374,6 +374,7 @@ export function deriveJobStatus(
   quantity: number | null | undefined,
   captureTimeIso: string | undefined,
   snapshots?: { produced: number | null; progress_pct: number | null; run_state: string | null }[],
+  hasNewerJob?: boolean,
 ): JobStatus {
   const p = typeof progressPct === 'number' ? progressPct : -1;
   const pr = typeof produced === 'number' ? produced : -1;
@@ -392,14 +393,18 @@ export function deriveJobStatus(
   // Operator marked as finished
   if (COMPLETED_RE.test(rs)) return 'completed';
 
-  // Plateau detection: if produced hasn't changed across the last 2+ snapshots
-  // and progress is high (≥95%), the job is finished even if run_state says running.
+  // Plateau detection: produced hasn't changed across last snapshots
   if (snapshots && snapshots.length >= 2) {
     const last3 = snapshots.slice(-3);
     const producedValues = last3.map((s) => s.produced ?? -1);
     const allSame = producedValues.every((v) => v === producedValues[0]);
-    const highProgress = last3.some((s) => (s.progress_pct ?? 0) >= 95);
-    if (allSame && highProgress && producedValues[0] >= 0) return 'completed';
+    if (allSame && producedValues[0] >= 0) {
+      // Produced flat + newer job exists → definitely finished (e.g. PAMS during CIP)
+      if (hasNewerJob) return 'completed';
+      // Produced flat + high progress → finished (CIP with no newer job yet)
+      const highProgress = last3.some((s) => (s.progress_pct ?? 0) >= 95);
+      if (highProgress) return 'completed';
+    }
   }
 
   // Stale snapshot — but only if not actively running

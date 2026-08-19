@@ -711,10 +711,16 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
       hour: h.startText ? h.startText.slice(0, 16).replace('T', ' ') : h.hour,
       in: h.in, out: h.out, rated: hourJobRates[h.start] ?? h.rated,
     }));
+    // Determine which jobs have a newer job that started after them.
+    const sortedByFirst = [...visibleJobs].sort((a, b) => a.firstCapture.localeCompare(b.firstCapture));
+    const hasNewerJobSet = new Set<number>();
+    for (let i = 0; i < sortedByFirst.length - 1; i++) {
+      hasNewerJobSet.add(sortedByFirst[i].jobId);
+    }
     const jobs = visibleJobs.map((j) => ({
       jobId: j.jobId, product: j.product, ratedSpeed: j.ratedSpeed,
       target: j.quantity, produced: j.produced, progressPct: j.progressPct,
-      status: deriveJobStatus(j.lastRunState, j.progressPct, j.produced, j.quantity, j.lastCapture, j.snapshots),
+      status: deriveJobStatus(j.lastRunState, j.progressPct, j.produced, j.quantity, j.lastCapture, j.snapshots, hasNewerJobSet.has(j.jobId)),
     }));
     const topDowntimeEvents = [...downtime]
       .sort((a, b) => (b.duration_ms ?? 0) - (a.duration_ms ?? 0))

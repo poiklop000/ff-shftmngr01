@@ -217,38 +217,30 @@ async function callGeminiDirect(prompt: string, mode: string): Promise<string> {
     );
   }
 
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(`${GEMINI_URL}?key=${key}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.4,
-        },
-      }),
-    });
+  const res = await fetch(`${GEMINI_URL}?key=${key}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.4,
+      },
+    }),
+  });
 
-    if (res.status === 429) {
-      if (attempt < 2) {
-        await new Promise((r) => setTimeout(r, (attempt + 1) * 15000));
-        continue;
-      }
-      throw new Error('Rate limited by Gemini — try again in a minute.');
-    }
-
-    if (!res.ok) {
-      const errBody = await res.text();
-      throw new Error(`Gemini API error ${res.status}: ${errBody}`);
-    }
-
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
-    if (!text) throw new Error('Gemini returned an empty response');
-    return text;
+  if (res.status === 429) {
+    throw new Error('Rate limited — wait 60 seconds before trying again.');
   }
 
-  throw new Error('Rate limited by Gemini — try again in a minute.');
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Gemini API error ${res.status}: ${errBody}`);
+  }
+
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
+  if (!text) throw new Error('Gemini returned an empty response');
+  return text;
 }
 
 async function callEdgeFunction(
@@ -258,34 +250,26 @@ async function callEdgeFunction(
   const token = session?.access_token;
   if (!token) throw new Error('Not authenticated');
 
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(`${FUNCTIONS_BASE}/ai-summarize`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
+  const res = await fetch(`${FUNCTIONS_BASE}/ai-summarize`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
 
-    if (res.status === 429) {
-      if (attempt < 2) {
-        await new Promise((r) => setTimeout(r, (attempt + 1) * 15000));
-        continue;
-      }
-      throw new Error('Rate limited by Gemini — try again in a minute.');
-    }
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(body?.error ?? `AI summary failed (${res.status})`);
-    }
-
-    const body = await res.json();
-    return body.summary as string;
+  if (res.status === 429) {
+    throw new Error('Rate limited — wait 60 seconds before trying again.');
   }
 
-  throw new Error('Rate limited by Gemini — try again in a minute.');
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `AI summary failed (${res.status})`);
+  }
+
+  const body = await res.json();
+  return body.summary as string;
 }
 
 export async function fetchAiSummary(

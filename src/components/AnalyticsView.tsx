@@ -14,6 +14,7 @@ import {
 import { fetchOverridesForJobs, saveJobOverride, deleteJobOverride, type JobOverride } from '@/lib/jobOverrides';
 import { fetchAiSummaryStream, sendAiChatMessage, copySummaryToClipboard, downloadSummaryTxt, buildPrompt, type ChatMessage, type AiSummaryPayload } from '@/lib/aiSummary';
 import { loadAiModel, saveAiModel, AI_MODELS, type AiModelId } from '@/lib/aiConfig';
+import { deriveJobStatus } from '@/lib/jobSnapshots';
 import type { Role } from '@/lib/auth';
 
 function csvEscape(value: string | number | null | undefined): string {
@@ -486,6 +487,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
       lastCapture: string;
       shifts: string[];
       runs: number;
+      lastRunState: string | null;
     }[] = [];
     for (const [jobId, { rows }] of map) {
       const last = rows[rows.length - 1]!;
@@ -506,6 +508,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
         lastCapture: last.capture_time,
         shifts,
         runs: rows.length,
+        lastRunState: last.run_state ?? null,
       });
     }
     list.sort((a, b) => a.jobId - b.jobId);
@@ -684,6 +687,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
     const jobs = visibleJobs.map((j) => ({
       jobId: j.jobId, product: j.product, ratedSpeed: j.ratedSpeed,
       target: j.quantity, produced: j.produced, progressPct: j.progressPct,
+      status: deriveJobStatus(j.lastRunState, j.progressPct, j.produced, j.quantity, j.lastCapture),
     }));
     const topDowntimeEvents = [...downtime]
       .sort((a, b) => (b.duration_ms ?? 0) - (a.duration_ms ?? 0))

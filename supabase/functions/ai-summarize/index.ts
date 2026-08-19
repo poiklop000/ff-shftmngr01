@@ -33,6 +33,7 @@ interface JobStat {
   target: number;
   produced: number;
   progressPct: number;
+  status: string;
 }
 
 interface DowntimeTypeStat {
@@ -103,6 +104,10 @@ function buildPrompt(s: StatsPayload): string {
     "Write a concise, professional summary of the production data below.",
   );
   parts.push("");
+  parts.push(
+    "Job status meanings: [running] = job is still in progress, report current progress not final output; [completed] = job finished; [setup] = line is being set up for this job; [stale] = no recent data, treat as likely finished.",
+  );
+  parts.push("");
 
   if (s.mode === "brief") {
     parts.push(
@@ -145,7 +150,7 @@ function buildPrompt(s: StatsPayload): string {
     parts.push("## Jobs");
     for (const j of s.jobs) {
       parts.push(
-        `Job ${j.jobId} (${j.product}): ${j.produced.toLocaleString()} / ${j.target.toLocaleString()} (${j.progressPct.toFixed(0)}%) at rated ${j.ratedSpeed.toLocaleString()}/hr`,
+        `Job ${j.jobId} (${j.product}) [${j.status}]: ${j.produced.toLocaleString()} / ${j.target.toLocaleString()} (${j.progressPct.toFixed(0)}%) at rated ${j.ratedSpeed.toLocaleString()}/hr`,
       );
     }
     parts.push("");

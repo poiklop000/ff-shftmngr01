@@ -361,3 +361,27 @@ function isRunningState(state: string | null | undefined): boolean {
   // blanks out a producing hour.
   return true;
 }
+
+export type JobStatus = 'running' | 'completed' | 'setup' | 'stale';
+
+export function deriveJobStatus(
+  runState: string | null | undefined,
+  progressPct: number | null | undefined,
+  produced: number | null | undefined,
+  quantity: number | null | undefined,
+  captureTimeIso: string | undefined,
+): JobStatus {
+  const p = typeof progressPct === 'number' ? progressPct : -1;
+  const pr = typeof produced === 'number' ? produced : -1;
+  const q = typeof quantity === 'number' ? quantity : -1;
+
+  if (p >= 100 || (q > 0 && pr >= q)) return 'completed';
+  if (/cleaning|setup|set.?up/i.test(runState ?? '')) return 'setup';
+  if (captureTimeIso) {
+    const age = Date.now() - new Date(captureTimeIso).getTime();
+    if (age > 30 * 60 * 1000) return 'stale';
+  }
+  if (isRunningState(runState)) return 'running';
+  if (p >= 0 && q > 0 && pr >= q) return 'completed';
+  return 'running';
+}

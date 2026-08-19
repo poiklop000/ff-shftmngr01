@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import type { AiModelId } from '@/lib/aiConfig';
+import type { JobStatus } from '@/lib/jobSnapshots';
 
 const FUNCTIONS_BASE = import.meta.env.VITE_SUPABASE_URL + '/functions/v1';
 const GEMINI_API_BASE =
@@ -17,6 +18,7 @@ interface JobStat {
   target: number;
   produced: number;
   progressPct: number;
+  status: JobStatus;
 }
 
 interface DowntimeTypeStat {
@@ -91,6 +93,10 @@ export function buildPrompt(s: AiSummaryPayload): string {
     'Write a concise, professional summary of the production data below.',
   );
   parts.push('');
+  parts.push(
+    'Job status meanings: [running] = job is still in progress, report current progress not final output; [completed] = job finished; [setup] = line is being set up for this job; [stale] = no recent data, treat as likely finished.',
+  );
+  parts.push('');
 
   if (s.mode === 'brief') {
     parts.push(
@@ -133,7 +139,7 @@ export function buildPrompt(s: AiSummaryPayload): string {
     parts.push('## Jobs');
     for (const j of s.jobs) {
       parts.push(
-        `Job ${j.jobId} (${j.product}): ${j.produced.toLocaleString()} / ${j.target.toLocaleString()} (${j.progressPct.toFixed(0)}%) at rated ${j.ratedSpeed.toLocaleString()}/hr`,
+        `Job ${j.jobId} (${j.product}) [${j.status}]: ${j.produced.toLocaleString()} / ${j.target.toLocaleString()} (${j.progressPct.toFixed(0)}%) at rated ${j.ratedSpeed.toLocaleString()}/hr`,
       );
     }
     parts.push('');
@@ -435,7 +441,7 @@ export async function* sendAiChatMessage(
   history: ChatMessage[],
   userMessage: string,
 ): AsyncGenerator<string> {
-  const dataContext = `[Production data context — do not repeat this data unless asked]\nDate range: ${payload.rangeStart} to ${payload.rangeEnd}\nTotal output: ${payload.totalOut.toLocaleString()} units\nAvg efficiency: ${payload.avgEfficiency.toFixed(1)}%\nUptime: ${payload.uptimePct.toFixed(1)}%\nDowntime: ${fmtDuration(payload.totalDowntimeMs)} across ${payload.downtimeCount} events\nJobs: ${payload.jobs.map((j) => `Job ${j.jobId} (${j.product}) ${j.produced}/${j.target}`).join('; ')}`;
+  const dataContext = `[Production data context — do not repeat this data unless asked]\nDate range: ${payload.rangeStart} to ${payload.rangeEnd}\nTotal output: ${payload.totalOut.toLocaleString()} units\nAvg efficiency: ${payload.avgEfficiency.toFixed(1)}%\nUptime: ${payload.uptimePct.toFixed(1)}%\nDowntime: ${fmtDuration(payload.totalDowntimeMs)} across ${payload.downtimeCount} events\nJobs: ${payload.jobs.map((j) => `Job ${j.jobId} (${j.product}) [${j.status}] ${j.produced}/${j.target}`).join('; ')}`;
 
   const contents: { role: string; parts: { text: string }[] }[] = [
     { role: 'user', parts: [{ text: dataContext }] },

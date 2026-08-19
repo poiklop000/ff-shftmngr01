@@ -1052,10 +1052,9 @@ html[data-theme='dark'] .yield-green { color: #86efac !important; }
 .calc-summary { position: sticky; top: 60px; z-index: 10; }
 .calc-scroll { display: flex; flex-direction: column; gap: 10px; }
 
-/* ---- iOS zoom prevention: inputs < 16px trigger auto-zoom ---- */
-@media (max-width: 768px) {
-  .sm-container .form-control { font-size: 16px !important; }
-  .sm-container select.form-control { font-size: 16px !important; }
+/* ---- iOS zoom: keep inputs at 16px+ to prevent auto-zoom on focus ---- */
+@supports (-webkit-touch-callout: none) {
+  .sm-container .form-control { font-size: 16px; }
 }
 
 /* ---- Live counter table ---- */

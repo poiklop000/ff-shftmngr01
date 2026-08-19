@@ -1044,6 +1044,17 @@ tbody tr:hover { background-color: #eff6ff; }
 html[data-theme='dark'] .yield-red { color: #fca5a5 !important; }
 html[data-theme='dark'] .yield-green { color: #86efac !important; }
 
+/* ---- Calculator sticky summary ---- */
+.calc-layout { display: flex; flex-direction: column; gap: 10px; }
+.calc-summary { position: sticky; top: 0; z-index: 10; }
+.calc-scroll { display: flex; flex-direction: column; gap: 10px; }
+
+/* ---- iOS zoom prevention: inputs < 16px trigger auto-zoom ---- */
+@media (max-width: 768px) {
+  .sm-container .form-control { font-size: 16px !important; }
+  .sm-container select.form-control { font-size: 16px !important; }
+}
+
 /* ---- Live counter table ---- */
 .live-counter-table {
   border-collapse: collapse;

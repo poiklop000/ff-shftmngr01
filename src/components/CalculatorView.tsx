@@ -163,50 +163,54 @@ export function CalculatorView({ calc, onChange, onUpdate, onClear }: Calculator
         ]}
       />
 
-      <div className="card card-green">
-        <h3>Production Summary</h3>
-        <Row label="Product:" value={activeProduct.trim() || calc.product.trim() || '-'} />
-        <Row label="Running Yield:" value={`${metrics.yieldPct.toFixed(2)}%`} valueClass={yieldClass} />
-        <Row label="Estimated Final Count:" value={metrics.finalCount} />
-        <Row label="Estimated Finish Time:" value={metrics.finishTime} />
-      </div>
-
-      <div className="section-panel">
-        <SelectField label="Can Size" field="size" calc={calc} onChange={onChange} />
-        <CalcField label="Total Plan" field="plan" calc={calc} onChange={onChange} type="text" inputMode="numeric" placeholder="0" formatOnBlur />
-        <CalcField label="Filler Speed" field="speed" calc={calc} onChange={onChange} type="text" inputMode="decimal" placeholder="0" formatOnBlur />
-      </div>
-
-      <div className="section-panel">
-        <CalcField label="Upstream Volume (Final Syrup)" field="uvol" calc={calc} onChange={onChange} type="text" inputMode="decimal" placeholder="0" formatOnBlur />
-        <CalcField label="Mixer Volume (ContiFlow KB)" field="mvol" calc={calc} onChange={onChange} type="number" inputMode="decimal" placeholder="0" />
-        <CalcField label="Mixing Ratio %" field="ratio" calc={calc} onChange={onChange} type="number" inputMode="decimal" placeholder="0" />
-        <CalcField label="Filler Production Counter" field="counter" calc={calc} onChange={onChange} type="text" inputMode="numeric" placeholder="0" formatOnBlur />
-        <CalcField label="Filler bowl level" field="bowl" calc={calc} onChange={onChange} type="number" inputMode="decimal" placeholder="0" />
-        <CalcField label="Cans per layer" field="layer" calc={calc} onChange={onChange} type="number" inputMode="numeric" placeholder="0" />
-        <CalcField label="Layers per pallet" field="pallet" calc={calc} onChange={onChange} type="number" inputMode="numeric" placeholder="0" />
-        <div className="sm-btn-row">
-          <button
-            type="button"
-            className="tab-btn tab-btn-blue"
-            onClick={() => {
-              setClockTick((t) => t + 1);
-              onUpdate();
-            }}
-          >
-            Update
-          </button>
+      <div className="calc-layout">
+        <div className="card card-green calc-summary">
+          <h3>Production Summary</h3>
+          <Row label="Product:" value={activeProduct.trim() || calc.product.trim() || '-'} />
+          <Row label="Running Yield:" value={`${metrics.yieldPct.toFixed(2)}%`} valueClass={yieldClass} />
+          <Row label="Estimated Final Count:" value={metrics.finalCount} />
+          <Row label="Estimated Finish Time:" value={metrics.finishTime} />
         </div>
-        <div className="sm-btn-row">
-          <button type="button" className="tab-btn tab-btn-red" onClick={onClear}>Clear Calculator</button>
-        </div>
-      </div>
 
-      <div className="card card-teal">
-        <h3>End Production (Based on remaining Syrup left)</h3>
-        <Row label="Remaining cans to be produce:" value={metrics.remaining} />
-        <Row label="Estimated pallets left:" value={metrics.palletsLeft} />
-        <Row label="Estimated layers left (-7):" value={metrics.depal} />
+        <div className="calc-scroll">
+          <div className="section-panel">
+            <SelectField label="Can Size" field="size" calc={calc} onChange={onChange} />
+            <CalcField label="Total Plan" field="plan" calc={calc} onChange={onChange} type="text" inputMode="numeric" placeholder="0" formatOnBlur />
+            <CalcField label="Filler Speed" field="speed" calc={calc} onChange={onChange} type="text" inputMode="decimal" placeholder="0" formatOnBlur />
+          </div>
+
+          <div className="section-panel">
+            <CalcField label="Upstream Volume (Final Syrup)" field="uvol" calc={calc} onChange={onChange} type="text" inputMode="decimal" placeholder="0" formatOnBlur />
+            <CalcField label="Mixer Volume (ContiFlow KB)" field="mvol" calc={calc} onChange={onChange} type="number" inputMode="decimal" placeholder="0" />
+            <CalcField label="Mixing Ratio %" field="ratio" calc={calc} onChange={onChange} type="number" inputMode="decimal" placeholder="0" />
+            <CalcField label="Filler Production Counter" field="counter" calc={calc} onChange={onChange} type="text" inputMode="numeric" placeholder="0" formatOnBlur />
+            <CalcField label="Filler bowl level" field="bowl" calc={calc} onChange={onChange} type="number" inputMode="decimal" placeholder="0" />
+            <CalcField label="Cans per layer" field="layer" calc={calc} onChange={onChange} type="number" inputMode="numeric" placeholder="0" />
+            <CalcField label="Layers per pallet" field="pallet" calc={calc} onChange={onChange} type="number" inputMode="numeric" placeholder="0" />
+            <div className="sm-btn-row">
+              <button
+                type="button"
+                className="tab-btn tab-btn-blue"
+                onClick={() => {
+                  setClockTick((t) => t + 1);
+                  onUpdate();
+                }}
+              >
+                Update
+              </button>
+            </div>
+            <div className="sm-btn-row">
+              <button type="button" className="tab-btn tab-btn-red" onClick={onClear}>Clear Calculator</button>
+            </div>
+          </div>
+
+          <div className="card card-teal">
+            <h3>End Production (Based on remaining Syrup left)</h3>
+            <Row label="Remaining cans to be produce:" value={metrics.remaining} />
+            <Row label="Estimated pallets left:" value={metrics.palletsLeft} />
+            <Row label="Estimated layers left (-7):" value={metrics.depal} />
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -1041,6 +1041,8 @@ tbody tr:hover { background-color: #eff6ff; }
 /* ---- Yield colors ---- */
 .yield-red { color: #b91c1c !important; font-weight: 700; }
 .yield-green { color: #166534 !important; font-weight: 700; }
+html[data-theme='dark'] .yield-red { color: #fca5a5 !important; }
+html[data-theme='dark'] .yield-green { color: #86efac !important; }
 
 /* ---- Live counter table ---- */
 .live-counter-table {

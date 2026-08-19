@@ -1375,7 +1375,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
                 onClick={() => {
                   downloadCsv(
                     `analytics_hourly_${loadedRange?.start}_to_${loadedRange?.end}.csv`,
-                    ['Date', 'Hour', 'In', 'Out', 'Rated'],
+                    ['Date', 'Hour', 'Filler - CM1 Out', 'CM2 Out', 'Rated'],
                     visibleHourly.map((h) => [h.startText ? h.startText.slice(0, 10) : '', h.hour, h.in, h.out, hourJobRates[h.start] ?? h.rated]),
                   );
                   setMsg('Hourly CSV exported');
@@ -1411,8 +1411,8 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
                       <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-800 border-b border-slate-200">
                         <th className="px-4 py-2.5">Date</th>
                         <th className="px-4 py-2.5">Hour</th>
-                        <th className="px-4 py-2.5">In</th>
-                        <th className="px-4 py-2.5">Out</th>
+                        <th className="px-4 py-2.5">Filler - CM1 Out</th>
+                        <th className="px-4 py-2.5">CM2 Out</th>
                         <th className="px-4 py-2.5">Rated</th>
                         <th className="px-4 py-2.5">Efficiency</th>
                       </tr>

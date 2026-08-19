@@ -513,6 +513,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
       shifts: string[];
       runs: number;
       lastRunState: string | null;
+      snapshots: JobSnapshotRow[];
     }[] = [];
     for (const [jobId, { rows }] of map) {
       const last = rows[rows.length - 1]!;
@@ -534,6 +535,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
         shifts,
         runs: rows.length,
         lastRunState: last.run_state ?? null,
+        snapshots: rows,
       });
     }
     list.sort((a, b) => a.jobId - b.jobId);
@@ -712,7 +714,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
     const jobs = visibleJobs.map((j) => ({
       jobId: j.jobId, product: j.product, ratedSpeed: j.ratedSpeed,
       target: j.quantity, produced: j.produced, progressPct: j.progressPct,
-      status: deriveJobStatus(j.lastRunState, j.progressPct, j.produced, j.quantity, j.lastCapture),
+      status: deriveJobStatus(j.lastRunState, j.progressPct, j.produced, j.quantity, j.lastCapture, j.snapshots),
     }));
     const topDowntimeEvents = [...downtime]
       .sort((a, b) => (b.duration_ms ?? 0) - (a.duration_ms ?? 0))

@@ -1045,8 +1045,9 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
                       onChange={(e) => setAiChatInput(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAiChat(); } }}
                       placeholder="e.g. What caused the most downtime on Tuesday?"
-                      disabled={aiChatLoading || aiCooldown > 0}
-                      style={{ flex: 1, fontSize: 12, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(124,58,237,0.3)', backgroundColor: 'rgba(255,255,255,0.5)', color: 'inherit', outline: 'none' }}
+                      disabled={aiLoading || aiCooldown > 0}
+                      className="ai-chat-input"
+                      style={{ flex: 1, fontSize: 12, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(124,58,237,0.3)', outline: 'none' }}
                     />
                     <button type="button" className="tab-btn tab-btn-purple" onClick={handleAiChat} disabled={aiChatLoading || aiCooldown > 0 || !aiChatInput.trim()} style={{ padding: '6px 12px' }}>
                       {aiChatLoading ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}

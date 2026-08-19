@@ -1052,6 +1052,20 @@ html[data-theme='dark'] .yield-green { color: #86efac !important; }
 .calc-summary { position: sticky; top: 60px; z-index: 10; }
 .calc-scroll { display: flex; flex-direction: column; gap: 10px; }
 
+/* ---- AI chat input ---- */
+.ai-chat-input {
+  background-color: rgba(255, 255, 255, 0.5);
+  color: inherit;
+}
+html[data-theme='dark'] .ai-chat-input {
+  background-color: rgba(30, 41, 59, 0.8);
+  color: #e2e8f0;
+  border-color: rgba(124, 58, 237, 0.5);
+}
+html[data-theme='dark'] .ai-chat-input::placeholder {
+  color: #94a3b8;
+}
+
 /* ---- iOS zoom: keep inputs at 16px+ to prevent auto-zoom on focus ---- */
 @supports (-webkit-touch-callout: none) {
   .sm-container .form-control { font-size: 16px; }

@@ -295,7 +295,9 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
   const [aiMode, setAiMode] = useState<'brief' | 'detailed'>('brief');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [aiCooldown, setAiCooldown] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Keep the Analytics filters and last loaded range in localStorage so the
   // page remembers them when the user navigates away and comes back.
@@ -636,8 +638,23 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
     setMsg('CSV exported');
   };
 
+  const startCooldown = useCallback((seconds: number) => {
+    setAiCooldown(seconds);
+    if (cooldownRef.current) clearInterval(cooldownRef.current);
+    cooldownRef.current = setInterval(() => {
+      setAiCooldown((prev) => {
+        if (prev <= 1) {
+          if (cooldownRef.current) clearInterval(cooldownRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
+
   const handleAiSummary = useCallback(async (mode: 'brief' | 'detailed') => {
     if (!data || !loadedRange) return;
+    if (aiCooldown > 0) return;
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -705,13 +722,20 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
         hourlyProduction,
         topDowntimeEvents,
       });
-      if (!ctrl.signal.aborted) setAiSummary(summary);
+      if (!ctrl.signal.aborted) {
+        setAiSummary(summary);
+        startCooldown(5);
+      }
     } catch (err) {
-      if (!ctrl.signal.aborted) setAiError(err instanceof Error ? err.message : 'Failed to generate summary');
+      const msg = err instanceof Error ? err.message : 'Failed to generate summary';
+      if (!ctrl.signal.aborted) setAiError(msg);
+      if (msg.includes('429') || msg.includes('Rate limited')) {
+        startCooldown(60);
+      }
     } finally {
       if (!ctrl.signal.aborted) setAiLoading(false);
     }
-  }, [data, loadedRange, downtime, visibleJobs, visibleHourly, hourJobRates, overrides, totalDowntimeMs, downtimeCount, longestDowntimeMs, uptimePct, totalOut, avgEfficiency, downtimeByCategory]);
+  }, [data, loadedRange, downtime, visibleJobs, visibleHourly, hourJobRates, overrides, totalDowntimeMs, downtimeCount, longestDowntimeMs, uptimePct, totalOut, avgEfficiency, downtimeByCategory, startCooldown]);
 
   const isLoading = loading;
   const hasData = !!data;
@@ -869,11 +893,13 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
 
             {!aiSummary && !aiLoading && !aiError && (
               <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12, fontWeight: 600 }}>Generate a summary for this data range:</span>
-                <button type="button" className="tab-btn tab-btn-purple" onClick={() => handleAiSummary('brief')} disabled={aiLoading}>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>
+                  {aiCooldown > 0 ? `Wait ${aiCooldown}s...` : 'Generate a summary for this data range:'}
+                </span>
+                <button type="button" className="tab-btn tab-btn-purple" onClick={() => handleAiSummary('brief')} disabled={aiLoading || aiCooldown > 0}>
                   Brief
                 </button>
-                <button type="button" className="tab-btn tab-btn-purple" style={{ opacity: 0.85 }} onClick={() => handleAiSummary('detailed')} disabled={aiLoading}>
+                <button type="button" className="tab-btn tab-btn-purple" style={{ opacity: 0.85 }} onClick={() => handleAiSummary('detailed')} disabled={aiLoading || aiCooldown > 0}>
                   Detailed
                 </button>
               </div>
@@ -889,6 +915,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
             {aiError && (
               <div className="ai-error" style={{ marginTop: 10, padding: '8px 12px', borderRadius: 6, background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', fontSize: 12, fontWeight: 600 }}>
                 {aiError}
+                {aiCooldown > 0 && <span style={{ marginLeft: 8, opacity: 0.7 }}>({aiCooldown}s)</span>}
                 <button type="button" style={{ marginLeft: 10, background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', fontSize: 12, fontWeight: 600 }} onClick={() => { setAiError(null); setAiSummary(null); }}>Dismiss</button>
               </div>
             )}
@@ -899,10 +926,10 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
                   {aiSummary}
                 </div>
                 <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <button type="button" className="tab-btn tab-btn-purple" onClick={() => handleAiSummary(aiMode)} disabled={aiLoading}>
-                    <RefreshCw size={11} style={{ marginRight: 4 }} /> Regenerate
+                  <button type="button" className="tab-btn tab-btn-purple" onClick={() => handleAiSummary(aiMode)} disabled={aiLoading || aiCooldown > 0}>
+                    <RefreshCw size={11} style={{ marginRight: 4 }} /> {aiCooldown > 0 ? `Retry in ${aiCooldown}s` : 'Regenerate'}
                   </button>
-                  <button type="button" className="tab-btn tab-btn-purple-outline" onClick={() => handleAiSummary(aiMode === 'brief' ? 'detailed' : 'brief')} disabled={aiLoading}>
+                  <button type="button" className="tab-btn tab-btn-purple-outline" onClick={() => handleAiSummary(aiMode === 'brief' ? 'detailed' : 'brief')} disabled={aiLoading || aiCooldown > 0}>
                     Switch to {aiMode === 'brief' ? 'Detailed' : 'Brief'}
                   </button>
                 </div>

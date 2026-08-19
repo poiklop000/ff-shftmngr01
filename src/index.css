@@ -745,6 +745,19 @@ html[data-theme='dark'] .popup-attention-strip-slow {
 .card-green:hover { box-shadow: 0 6px 20px rgba(22, 101, 52, 0.12), 0 2px 6px rgba(22, 101, 52, 0.08); }
 .card-teal:hover { box-shadow: 0 6px 20px rgba(20, 184, 166, 0.12), 0 2px 6px rgba(20, 184, 166, 0.08); }
 .card-purple:hover { box-shadow: 0 6px 20px rgba(147, 51, 234, 0.12), 0 2px 6px rgba(147, 51, 234, 0.08); }
+.card-purple .ai-model-select {
+  background: #fff;
+  color: #6b21a8;
+  border: 1px solid #c084fc;
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 2px 6px;
+}
+html[data-theme='dark'] .card-purple .ai-model-select {
+  background: #2d1650;
+  color: #c4b5fd;
+  border-color: #7c3aed;
+}
 .card h3 {
   margin: 0 0 12px 0;
   border-bottom: 1px solid currentColor;

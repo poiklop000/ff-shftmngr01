@@ -934,10 +934,10 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
               <Sparkles size={16} style={{ opacity: 0.7 }} />
               <span style={{ fontSize: 14, fontWeight: 700 }}>AI Summary</span>
               <select
-                className="combo"
+                className="ai-model-select"
                 value={aiModel}
                 onChange={(e) => { const v = e.target.value as AiModelId; setAiModel(v); saveAiModel(v).catch(() => {}); }}
-                style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 6px', width: 'auto' }}
+                style={{ marginLeft: 'auto' }}
               >
                 {AI_MODELS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
               </select>

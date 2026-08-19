@@ -94,7 +94,7 @@ export function buildPrompt(s: AiSummaryPayload): string {
   );
   parts.push('');
   parts.push(
-    'Job status meanings: [running] = job is still in progress, report current progress not final output; [completed] = job finished; [setup] = line is being set up for this job; [stale] = no recent data, treat as likely finished.',
+    'Job status meanings: [running] = job is still in progress, report current progress not final output; [completed] = job finished naturally (target reached or OFS marked complete); [setup] = line is being set up for this job; [stopped] = job halted due to breakdown, maintenance, or line down — NOT finished; [stale] = no recent data, cannot determine status.',
   );
   parts.push('');
 

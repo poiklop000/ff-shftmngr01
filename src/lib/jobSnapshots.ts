@@ -362,7 +362,10 @@ function isRunningState(state: string | null | undefined): boolean {
   return true;
 }
 
-export type JobStatus = 'running' | 'completed' | 'setup' | 'stale';
+export type JobStatus = 'running' | 'completed' | 'setup' | 'stopped' | 'stale';
+
+const STOPPED_RE = /\b(down|fault|error|maintenance|maintain|break|lunch|pause|alarm|held|hold|not.?running|inactive)\b/i;
+const COMPLETED_RE = /\b(stop|finish|complete|idle|standby|wait)\b/i;
 
 export function deriveJobStatus(
   runState: string | null | undefined,
@@ -374,14 +377,29 @@ export function deriveJobStatus(
   const p = typeof progressPct === 'number' ? progressPct : -1;
   const pr = typeof produced === 'number' ? produced : -1;
   const q = typeof quantity === 'number' ? quantity : -1;
+  const rs = (runState ?? '').trim();
 
+  // Hard evidence of completion
   if (p >= 100 || (q > 0 && pr >= q)) return 'completed';
-  if (/cleaning|setup|set.?up/i.test(runState ?? '')) return 'setup';
+
+  // Setup for next job
+  if (/cleaning|setup|set.?up/i.test(rs)) return 'setup';
+
+  // Breakdown / maintenance / line down
+  if (STOPPED_RE.test(rs)) return 'stopped';
+
+  // Operator marked as finished
+  if (COMPLETED_RE.test(rs)) return 'completed';
+
+  // Stale snapshot — but only if not actively running
   if (captureTimeIso) {
     const age = Date.now() - new Date(captureTimeIso).getTime();
-    if (age > 30 * 60 * 1000) return 'stale';
+    if (age > 30 * 60 * 1000) {
+      if (isRunningState(rs)) return 'stale';
+      return 'stopped';
+    }
   }
-  if (isRunningState(runState)) return 'running';
-  if (p >= 0 && q > 0 && pr >= q) return 'completed';
+
+  if (isRunningState(rs)) return 'running';
   return 'running';
 }

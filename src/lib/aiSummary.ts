@@ -1,10 +1,9 @@
 import { supabase } from '@/lib/supabase';
+import type { AiModelId } from '@/lib/aiConfig';
 
 const FUNCTIONS_BASE = import.meta.env.VITE_SUPABASE_URL + '/functions/v1';
-const GEMINI_BASE =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite';
-const GEMINI_STREAM_URL = `${GEMINI_BASE}:streamGenerateContent?alt=sse`;
-const GEMINI_URL = `${GEMINI_BASE}:generateContent`;
+const GEMINI_API_BASE =
+  'https://generativelanguage.googleapis.com/v1beta/models';
 
 const IS_LOCAL =
   typeof window !== 'undefined' &&
@@ -53,6 +52,7 @@ interface TopDowntimeEvent {
 }
 
 export interface AiSummaryPayload {
+  model: AiModelId;
   mode: 'brief' | 'detailed';
   rangeStart: string;
   rangeEnd: string;
@@ -220,7 +220,7 @@ export function buildPrompt(s: AiSummaryPayload): string {
 // Gemini direct calls (local dev)
 // ---------------------------------------------------------------------------
 
-async function callGeminiDirect(prompt: string, _mode: string): Promise<string> {
+async function callGeminiDirect(prompt: string, model: AiModelId): Promise<string> {
   const key = import.meta.env.VITE_GEMINI_API_KEY;
   if (!key) {
     throw new Error(
@@ -228,7 +228,8 @@ async function callGeminiDirect(prompt: string, _mode: string): Promise<string> 
     );
   }
 
-  const res = await fetch(`${GEMINI_URL}?key=${key}`, {
+  const url = `${GEMINI_API_BASE}/${model}:generateContent?key=${key}`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -257,13 +258,15 @@ async function callGeminiDirect(prompt: string, _mode: string): Promise<string> 
 
 async function* streamGeminiDirect(
   contents: { role: string; parts: { text: string }[] }[],
+  model: AiModelId,
 ): AsyncGenerator<string> {
   const key = import.meta.env.VITE_GEMINI_API_KEY;
   if (!key) {
     throw new Error('VITE_GEMINI_API_KEY not set in .env');
   }
 
-  const res = await fetch(`${GEMINI_STREAM_URL}&key=${key}`, {
+  const url = `${GEMINI_API_BASE}/${model}:streamGenerateContent?alt=sse&key=${key}`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -344,6 +347,7 @@ async function callEdgeFunction(
 
 async function* streamEdgeFunction(
   contents: { role: string; parts: { text: string }[] }[],
+  model: AiModelId,
 ): AsyncGenerator<string> {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;
@@ -355,7 +359,7 @@ async function* streamEdgeFunction(
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ contents }),
+    body: JSON.stringify({ contents, model }),
   });
 
   if (res.status === 429) {
@@ -406,7 +410,7 @@ export async function fetchAiSummary(
 ): Promise<string> {
   if (IS_LOCAL) {
     const prompt = buildPrompt(payload);
-    return callGeminiDirect(prompt, payload.mode);
+    return callGeminiDirect(prompt, payload.model);
   }
   return callEdgeFunction(payload);
 }
@@ -419,9 +423,9 @@ export async function* fetchAiSummaryStream(
   const contents = [{ role: 'user', parts: [{ text: prompt }] }];
 
   if (IS_LOCAL) {
-    yield* streamGeminiDirect(contents);
+    yield* streamGeminiDirect(contents, payload.model);
   } else {
-    yield* streamEdgeFunction(contents);
+    yield* streamEdgeFunction(contents, payload.model);
   }
 }
 
@@ -451,9 +455,9 @@ export async function* sendAiChatMessage(
   contents.push({ role: 'user', parts: [{ text: userMessage }] });
 
   if (IS_LOCAL) {
-    yield* streamGeminiDirect(contents);
+    yield* streamGeminiDirect(contents, payload.model);
   } else {
-    yield* streamEdgeFunction(contents);
+    yield* streamEdgeFunction(contents, payload.model);
   }
 }
 

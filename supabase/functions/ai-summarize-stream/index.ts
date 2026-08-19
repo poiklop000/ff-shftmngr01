@@ -4,8 +4,8 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const GEMINI_STREAM_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:streamGenerateContent?alt=sse";
+const GEMINI_API_BASE =
+  "https://generativelanguage.googleapis.com/v1beta/models";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -56,12 +56,14 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { contents } = await req.json();
+    const { contents, model: reqModel } = await req.json();
     if (!Array.isArray(contents) || contents.length === 0) {
       return jsonResp({ error: "contents array required" }, 400);
     }
 
-    const geminiResp = await fetch(`${GEMINI_STREAM_URL}&key=${geminiKey}`, {
+    const model = reqModel || "gemini-3.5-flash-lite";
+    const streamUrl = `${GEMINI_API_BASE}/${model}:streamGenerateContent?alt=sse`;
+    const geminiResp = await fetch(`${streamUrl}&key=${geminiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

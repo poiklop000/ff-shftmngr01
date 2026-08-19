@@ -13,6 +13,7 @@ import {
 } from '@/lib/analytics';
 import { fetchOverridesForJobs, saveJobOverride, deleteJobOverride, type JobOverride } from '@/lib/jobOverrides';
 import { fetchAiSummaryStream, sendAiChatMessage, copySummaryToClipboard, downloadSummaryTxt, buildPrompt, type ChatMessage, type AiSummaryPayload } from '@/lib/aiSummary';
+import { loadAiModel, saveAiModel, AI_MODELS, type AiModelId } from '@/lib/aiConfig';
 import type { Role } from '@/lib/auth';
 
 function csvEscape(value: string | number | null | undefined): string {
@@ -295,6 +296,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
   const [overrideError, setOverrideError] = useState<string | null>(null);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [aiMode, setAiMode] = useState<'brief' | 'detailed'>('brief');
+  const [aiModel, setAiModel] = useState<AiModelId>('gemini-3.5-flash-lite');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiCooldown, setAiCooldown] = useState(0);
@@ -315,6 +317,10 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
       // ignore storage failures
     }
   }, [startAt, endAt, textFilter, typeFilters, jobFilters, loadedRange]);
+
+  useEffect(() => {
+    loadAiModel().then(setAiModel).catch(() => {});
+  }, []);
 
   const loadData = useCallback(async (start: string, end: string) => {
     if (!start || !end) {
@@ -692,13 +698,13 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
           .map((c) => ({ author: c.userName, text: c.text })),
       }));
     return {
-      mode: aiMode, rangeStart: loadedRange.start.replace('T', ' '),
+      model: aiModel, mode: aiMode, rangeStart: loadedRange.start.replace('T', ' '),
       rangeEnd: loadedRange.end.replace('T', ' '),
       totalDowntimeMs, downtimeCount, longestDowntimeMs, uptimePct,
       totalOut, avgEfficiency, jobs, downtimeByType, downtimeByCategory,
       hourlyProduction, topDowntimeEvents,
     };
-  }, [data, loadedRange, downtime, visibleJobs, visibleHourly, hourJobRates, totalDowntimeMs, downtimeCount, longestDowntimeMs, uptimePct, totalOut, avgEfficiency, downtimeByCategory, aiMode]);
+  }, [data, loadedRange, downtime, visibleJobs, visibleHourly, hourJobRates, totalDowntimeMs, downtimeCount, longestDowntimeMs, uptimePct, totalOut, avgEfficiency, downtimeByCategory, aiMode, aiModel]);
 
   const handleAiSummary = useCallback(async (newMode: 'brief' | 'detailed') => {
     if (!data || !loadedRange) return;
@@ -927,6 +933,14 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
             <h3 style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0, paddingBottom: 8, borderBottom: '1px solid currentColor' }}>
               <Sparkles size={16} style={{ opacity: 0.7 }} />
               <span style={{ fontSize: 14, fontWeight: 700 }}>AI Summary</span>
+              <select
+                className="combo"
+                value={aiModel}
+                onChange={(e) => { const v = e.target.value as AiModelId; setAiModel(v); saveAiModel(v).catch(() => {}); }}
+                style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 6px', width: 'auto' }}
+              >
+                {AI_MODELS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
             </h3>
 
             {!aiSummary && !aiLoading && !aiError && (

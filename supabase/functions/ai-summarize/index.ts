@@ -10,8 +10,8 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const GEMINI_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent";
+const GEMINI_API_BASE =
+  "https://generativelanguage.googleapis.com/v1beta/models";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -68,6 +68,7 @@ interface TopDowntimeEvent {
 }
 
 interface StatsPayload {
+  model: string;
   mode: "brief" | "detailed";
   rangeStart: string;
   rangeEnd: string;
@@ -264,8 +265,9 @@ Deno.serve(async (req) => {
 
     const payload: StatsPayload = await req.json();
     const prompt = buildPrompt(payload);
+    const model = payload.model || "gemini-3.5-flash-lite";
 
-    const geminiResp = await fetch(`${GEMINI_URL}?key=${geminiKey}`, {
+    const geminiResp = await fetch(`${GEMINI_API_BASE}/${model}:generateContent?key=${geminiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

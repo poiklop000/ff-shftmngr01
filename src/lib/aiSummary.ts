@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabase';
 
 const FUNCTIONS_BASE = import.meta.env.VITE_SUPABASE_URL + '/functions/v1';
 const GEMINI_BASE =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash';
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite';
 const GEMINI_STREAM_URL = `${GEMINI_BASE}:streamGenerateContent?alt=sse`;
 const GEMINI_URL = `${GEMINI_BASE}:generateContent`;
 

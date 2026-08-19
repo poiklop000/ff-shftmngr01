@@ -11,7 +11,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const GEMINI_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent";
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",

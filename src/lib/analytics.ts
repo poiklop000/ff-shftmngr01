@@ -84,6 +84,26 @@ export async function fetchLatestJobRates(jobIds: number[]): Promise<Record<numb
   return latest;
 }
 
+export async function fetchLatestJobTargets(jobIds: number[]): Promise<Record<number, number>> {
+  if (jobIds.length === 0) return {};
+  const { data, error } = await withTimeout(
+    supabase
+      .from('job_snapshots')
+      .select('job_id, quantity, capture_time')
+      .in('job_id', jobIds)
+      .order('capture_time', { ascending: false })
+      .limit(1000),
+    DB_TIMEOUT_MS,
+  );
+  if (error) throw new Error(error.message);
+  const latest: Record<number, number> = {};
+  for (const row of (data as { job_id: number | null; quantity: number | null }[]) ?? []) {
+    if (row.job_id == null || row.quantity == null) continue;
+    if (!(row.job_id in latest)) latest[row.job_id] = row.quantity;
+  }
+  return latest;
+}
+
 /**
  * Fetches saved monitoring records whose record_date falls within the given
  * range (inclusive). Dates are YYYY-MM-DD.

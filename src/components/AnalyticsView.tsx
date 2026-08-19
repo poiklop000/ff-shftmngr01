@@ -9,6 +9,7 @@ import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counter
 import {
   fetchJobsInRange,
   fetchLatestJobRates,
+  fetchLatestJobTargets,
   type JobSnapshotRow,
 } from '@/lib/analytics';
 import { fetchOverridesForJobs, saveJobOverride, deleteJobOverride, type JobOverride } from '@/lib/jobOverrides';
@@ -302,6 +303,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
   const [expandedDowntimeId, setExpandedDowntimeId] = useState<number | null>(null);
   const [overrides, setOverrides] = useState<Record<number, JobOverride>>({});
   const [latestRates, setLatestRates] = useState<Record<number, number>>({});
+  const [latestTargets, setLatestTargets] = useState<Record<number, number>>({});
   const [editingJobId, setEditingJobId] = useState<number | null>(null);
   const [draftProduct, setDraftProduct] = useState('');
   const [draftSpeed, setDraftSpeed] = useState('');
@@ -387,6 +389,9 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
       // the range) so the table reflects where each job stands today.
       const latestRates = await fetchLatestJobRates(jobIds);
       setLatestRates(latestRates);
+
+      const latestTargets = await fetchLatestJobTargets(jobIds);
+      setLatestTargets(latestTargets);
 
       // If specific jobs are selected but don't appear in the new range, drop
       // them so the page doesn't keep an empty filter.
@@ -519,7 +524,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
         jobId,
         product: ovr?.product_name?.trim() || ofsProduct,
         sku: last.sku ?? '',
-        quantity: last.quantity ?? 0,
+        quantity: latestTargets[jobId] ?? last.quantity ?? 0,
         produced: last.produced ?? 0,
         progressPct: last.progress_pct ?? 0,
         ratedSpeed: ovr?.rated_speed ?? (latestRates[jobId] ?? last.rated_speed ?? 0),
@@ -533,7 +538,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
     }
     list.sort((a, b) => a.jobId - b.jobId);
     return list;
-  }, [data, overrides, latestRates]);
+  }, [data, overrides, latestRates, latestTargets]);
 
   // When one or more jobs are selected, the whole page (jobs, downtime, hourly
   // production, result cards, exports) narrows down to just those jobs.

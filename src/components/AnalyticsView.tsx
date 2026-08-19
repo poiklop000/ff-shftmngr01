@@ -13,6 +13,7 @@ import {
 } from '@/lib/analytics';
 import { fetchOverridesForJobs, saveJobOverride, deleteJobOverride, type JobOverride } from '@/lib/jobOverrides';
 import { fetchAiSummary } from '@/lib/aiSummary';
+import type { Role } from '@/lib/auth';
 
 function csvEscape(value: string | number | null | undefined): string {
   const str = String(value ?? '');
@@ -269,9 +270,10 @@ function barColor(i: number): string {
 
 interface AnalyticsViewProps {
   syncTick?: number;
+  userRole?: Role;
 }
 
-export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
+export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
   const [persisted] = useState(() => loadAnalyticsPersist());
   const [startAt, setStartAt] = useState(persisted.startAt);
   const [endAt, setEndAt] = useState(persisted.endAt);
@@ -884,7 +886,8 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
             </div>
           </div>
 
-          {/* AI Summary */}
+          {/* AI Summary — admin only */}
+          {userRole === 'admin' && (
           <div className="card card-purple">
             <h3 style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0, paddingBottom: 8, borderBottom: '1px solid currentColor' }}>
               <Sparkles size={16} style={{ opacity: 0.7 }} />
@@ -936,6 +939,7 @@ export function AnalyticsView({ syncTick = 0 }: AnalyticsViewProps) {
               </>
             )}
           </div>
+          )}
 
           {/* Jobs */}
           <div className="card card-blue">

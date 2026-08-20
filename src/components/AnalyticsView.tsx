@@ -1171,7 +1171,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
                           <td className="px-4 py-3 text-slate-700">
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               <div style={{ width: 80, height: 8, backgroundColor: 'var(--track-bg)', borderRadius: 999, overflow: 'hidden' }}>
-                                <div style={{ width: `${Math.min(100, Math.max(0, j.progressPct))}%`, height: '100%', backgroundColor: j.progressPct >= 100 ? '#16a34a' : '#1d4ed8' }} />
+                                <div style={{ width: `${Math.min(100, Math.max(0, j.progressPct))}%`, height: '100%', backgroundColor: j.progressPct >= 97 ? '#16a34a' : '#dc2626' }} />
                               </div>
                               <span>{j.progressPct.toFixed(1)}%</span>
                             </div>
@@ -1257,7 +1257,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
                         style={{
                           width: `${Math.min(100, Math.max(0, j.progressPct))}%`,
                           height: '100%',
-                          backgroundColor: barColor(i),
+                          backgroundColor: j.progressPct >= 97 ? '#16a34a' : '#dc2626',
                           borderRadius: 6,
                           transition: 'width 0.3s ease',
                         }}

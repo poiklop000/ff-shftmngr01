@@ -557,19 +557,8 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
   }, [jobs]);
 
   const visibleJobs = useMemo(() => {
-    const filtered = jobFilters.length === 0 ? jobs : jobs.filter((j) => jobFilters.includes(j.jobId));
-    // Exclude jobs that finished before the range: status is completed AND
-    // produced never changed across all snapshots (flat from the start).
-    return filtered.filter((j) => {
-      const status = deriveJobStatus(j.lastRunState, j.progressPct, j.produced, j.quantity, j.lastCapture, j.snapshots, hasNewerJobSet.has(j.jobId), plateauThreshold);
-      if (status !== 'completed') return true;
-      if (j.snapshots.length < 2) return true;
-      const producedValues = j.snapshots.map((s) => s.produced ?? -1);
-      const allSame = producedValues.every((v) => v === producedValues[0]);
-      // If produced was flat the entire time, this job finished before the range
-      return !allSame;
-    });
-  }, [jobs, jobFilters, plateauThreshold, hasNewerJobSet]);
+    return jobFilters.length === 0 ? jobs : jobs.filter((j) => jobFilters.includes(j.jobId));
+  }, [jobs, jobFilters]);
 
   const visibleHourly = useMemo(() => {
     if (!data) return [];

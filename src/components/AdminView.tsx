@@ -4,6 +4,7 @@ import { AlertHistory } from '@/components/AlertHistory';
 import { AlertsConfig } from '@/components/AlertsConfig';
 import { BoardConfig } from '@/components/BoardConfig';
 import { OfsKillSwitch } from '@/components/OfsKillSwitch';
+import { loadPlateauThreshold, savePlateauThreshold } from '@/lib/jobSnapshots';
 import { ACCESSIBLE_PAGE_OPTIONS, roleDefaultPages, userAllowedViews, type View } from '@/lib/access';
 import {
   adminCreateUser,
@@ -298,6 +299,8 @@ export function AdminView({ currentUserId, syncing = false, syncMessage, syncErr
         <OfsKillSwitch />
       </div>
 
+      <PlateauThresholdConfig />
+
       {error && (
         <div style={{ fontSize: 13, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: 8, padding: '8px 10px', fontWeight: 600, marginBottom: 12 }}>
           {error}
@@ -580,6 +583,62 @@ export function AdminView({ currentUserId, syncing = false, syncMessage, syncErr
       {tab === 'history' && (
         <div>
           <AlertHistory />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlateauThresholdConfig() {
+  const [threshold, setThreshold] = useState(95);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadPlateauThreshold().then(setThreshold).catch(() => {});
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    setMsg(null);
+    try {
+      await savePlateauThreshold(threshold);
+      setMsg('Saved');
+      setTimeout(() => setMsg(null), 2000);
+    } catch {
+      setMsg('Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontWeight: 800, fontSize: 15 }}>Job Completion Threshold</div>
+          <div style={{ fontSize: 12, marginTop: 4, lineHeight: 1.5, opacity: 0.8 }}>
+            If produced count plateaus and progress is above this %, the job is marked completed (e.g. during CIP). Lower if jobs finish below target due to low yield.
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={threshold}
+            onChange={(e) => setThreshold(Number(e.target.value))}
+            style={{ width: 60, padding: '4px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 14, fontWeight: 700, textAlign: 'center' }}
+          />
+          <span style={{ fontSize: 14, fontWeight: 700 }}>%</span>
+          <button type="button" className="tab-btn tab-btn-blue" onClick={save} disabled={saving} style={{ padding: '4px 12px' }}>
+            Save
+          </button>
+        </div>
+      </div>
+      {msg && (
+        <div style={{ fontSize: 12, fontWeight: 600, marginTop: 6, color: msg === 'Saved' ? 'var(--success-text)' : 'var(--danger-text)' }}>
+          {msg}
         </div>
       )}
     </div>

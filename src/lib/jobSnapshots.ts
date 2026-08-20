@@ -375,11 +375,13 @@ export function deriveJobStatus(
   captureTimeIso: string | undefined,
   snapshots?: { produced: number | null; progress_pct: number | null; run_state: string | null }[],
   hasNewerJob?: boolean,
+  plateauThresholdPct?: number,
 ): JobStatus {
   const p = typeof progressPct === 'number' ? progressPct : -1;
   const pr = typeof produced === 'number' ? produced : -1;
   const q = typeof quantity === 'number' ? quantity : -1;
   const rs = (runState ?? '').trim();
+  const threshold = typeof plateauThresholdPct === 'number' ? plateauThresholdPct : DEFAULT_PLATEAU_THRESHOLD;
 
   // Hard evidence of completion
   if (p >= 100 || (q > 0 && pr >= q)) return 'completed';
@@ -402,7 +404,7 @@ export function deriveJobStatus(
       // Produced flat + newer job exists → definitely finished (e.g. PAMS during CIP)
       if (hasNewerJob) return 'completed';
       // Produced flat + high progress → finished (CIP with no newer job yet)
-      const highProgress = last3.some((s) => (s.progress_pct ?? 0) >= 95);
+      const highProgress = last3.some((s) => (s.progress_pct ?? 0) >= threshold);
       if (highProgress) return 'completed';
     }
   }
@@ -418,4 +420,25 @@ export function deriveJobStatus(
 
   if (isRunningState(rs)) return 'running';
   return 'running';
+}
+
+const PLATEAU_THRESHOLD_KEY = 'plateau_threshold_pct';
+const DEFAULT_PLATEAU_THRESHOLD = 95;
+
+export async function loadPlateauThreshold(): Promise<number> {
+  const { data } = await supabase
+    .from('app_config')
+    .select('value')
+    .eq('key', PLATEAU_THRESHOLD_KEY)
+    .maybeSingle();
+  const val = parseInt(data?.value ?? '', 10);
+  return Number.isFinite(val) && val >= 0 && val <= 100 ? val : DEFAULT_PLATEAU_THRESHOLD;
+}
+
+export async function savePlateauThreshold(pct: number): Promise<void> {
+  const safe = Math.max(0, Math.min(100, Math.round(pct)));
+  const { error } = await supabase
+    .from('app_config')
+    .upsert({ key: PLATEAU_THRESHOLD_KEY, value: String(safe) }, { onConflict: 'key' });
+  if (error) throw new Error(error.message);
 }

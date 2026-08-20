@@ -15,7 +15,7 @@ import {
 import { fetchOverridesForJobs, saveJobOverride, deleteJobOverride, type JobOverride } from '@/lib/jobOverrides';
 import { fetchAiSummaryStream, sendAiChatMessage, copySummaryToClipboard, downloadSummaryTxt, buildPrompt, type ChatMessage, type AiSummaryPayload } from '@/lib/aiSummary';
 import { loadAiModel, saveAiModel, AI_MODELS, type AiModelId } from '@/lib/aiConfig';
-import { deriveJobStatus } from '@/lib/jobSnapshots';
+import { deriveJobStatus, loadPlateauThreshold } from '@/lib/jobSnapshots';
 import type { Role } from '@/lib/auth';
 
 function csvEscape(value: string | number | null | undefined): string {
@@ -312,6 +312,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
   const [aiSummary, setAiSummary] = useState<string | null>(persisted.aiSummary);
   const [aiMode, setAiMode] = useState<'brief' | 'detailed'>(persisted.aiMode);
   const [aiModel, setAiModel] = useState<AiModelId>(persisted.aiModel);
+  const [plateauThreshold, setPlateauThreshold] = useState(95);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiCooldown, setAiCooldown] = useState(0);
@@ -338,6 +339,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
 
   useEffect(() => {
     loadAiModel().then(setAiModel).catch(() => {});
+    loadPlateauThreshold().then(setPlateauThreshold).catch(() => {});
   }, []);
 
   const loadData = useCallback(async (start: string, end: string) => {
@@ -720,7 +722,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
     const jobs = visibleJobs.map((j) => ({
       jobId: j.jobId, product: j.product, ratedSpeed: j.ratedSpeed,
       target: j.quantity, produced: j.produced, progressPct: j.progressPct,
-      status: deriveJobStatus(j.lastRunState, j.progressPct, j.produced, j.quantity, j.lastCapture, j.snapshots, hasNewerJobSet.has(j.jobId)),
+      status: deriveJobStatus(j.lastRunState, j.progressPct, j.produced, j.quantity, j.lastCapture, j.snapshots, hasNewerJobSet.has(j.jobId), plateauThreshold),
     }));
     const topDowntimeEvents = [...downtime]
       .sort((a, b) => (b.duration_ms ?? 0) - (a.duration_ms ?? 0))

@@ -628,7 +628,7 @@ function PlateauThresholdConfig() {
             max={100}
             value={threshold}
             onChange={(e) => setThreshold(Number(e.target.value))}
-            style={{ width: 60, padding: '4px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 14, fontWeight: 700, textAlign: 'center' }}
+            style={{ width: 60, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--card-border)', background: 'var(--card-bg)', color: 'var(--text-muted)', fontSize: 14, fontWeight: 700, textAlign: 'center' }}
           />
           <span style={{ fontSize: 14, fontWeight: 700 }}>%</span>
           <button type="button" className="tab-btn tab-btn-blue" onClick={save} disabled={saving} style={{ padding: '4px 12px' }}>

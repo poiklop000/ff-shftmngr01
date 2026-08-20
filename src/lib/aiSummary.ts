@@ -85,7 +85,7 @@ function fmtDuration(ms: number): string {
 }
 
 export function buildPrompt(s: AiSummaryPayload): string {
-  const activeJobs = s.jobs.filter((j) => j.status !== 'stale');
+  const activeJobs = s.jobs.map((j) => j.status === 'stale' ? { ...j, status: 'completed' as const } : j);
   const parts: string[] = [];
   parts.push(
     'You are a factory production analyst for a canning line in New Zealand.',
@@ -98,7 +98,10 @@ export function buildPrompt(s: AiSummaryPayload): string {
   );
   parts.push('');
   parts.push(
-    'Job status meanings: [running] = job is still in progress, report current progress not final output; [completed] = job finished naturally (target reached or OFS marked complete); [setup] = line is being set up for this job; [stopped] = job halted due to breakdown, maintenance, or line down — NOT finished.',
+    'Job status meanings: [running] = job is still in progress within the data range, report current progress not final output; [completed] = job finished within the data range (target reached, OFS marked complete, or last capture in range shows production stopped); [setup] = line is being set up for this job; [stopped] = job halted due to breakdown, maintenance, or line down — NOT finished.',
+  );
+  parts.push(
+    'Report each job exactly as captured within the selected time range. Do not assume what happened outside the range. If progress exceeds 100%, note the overproduction.',
   );
   parts.push('');
 
@@ -142,8 +145,10 @@ export function buildPrompt(s: AiSummaryPayload): string {
   if (activeJobs.length > 0) {
     parts.push('## Jobs');
     for (const j of activeJobs) {
+      const pct = Math.min(j.progressPct, 999);
+      const overnote = j.progressPct > 100 ? ` (overproduction: +${(j.produced - j.target).toLocaleString()} units)` : '';
       parts.push(
-        `Job ${j.jobId} (${j.product}) [${j.status}]: ${j.produced.toLocaleString()} / ${j.target.toLocaleString()} (${j.progressPct.toFixed(0)}%) at rated ${j.ratedSpeed.toLocaleString()}/hr`,
+        `Job ${j.jobId} (${j.product}) [${j.status}]: ${j.produced.toLocaleString()} / ${j.target.toLocaleString()} (${pct.toFixed(0)}%) at rated ${j.ratedSpeed.toLocaleString()}/hr${overnote}`,
       );
     }
     parts.push('');
@@ -448,7 +453,7 @@ export async function* sendAiChatMessage(
   history: ChatMessage[],
   userMessage: string,
 ): AsyncGenerator<string> {
-  const dataContext = `[Production data context — do not repeat this data unless asked]\nDate range: ${payload.rangeStart} to ${payload.rangeEnd}\nTotal output: ${payload.totalOut.toLocaleString()} units\nAvg efficiency: ${payload.avgEfficiency.toFixed(1)}%\nUptime: ${payload.uptimePct.toFixed(1)}%\nDowntime: ${fmtDuration(payload.totalDowntimeMs)} across ${payload.downtimeCount} events\nJobs: ${payload.jobs.filter((j) => j.status !== 'stale').map((j) => `Job ${j.jobId} (${j.product}) [${j.status}] ${j.produced}/${j.target}`).join('; ')}`;
+  const dataContext = `[Production data context — do not repeat this data unless asked]\nDate range: ${payload.rangeStart} to ${payload.rangeEnd}\nTotal output: ${payload.totalOut.toLocaleString()} units\nAvg efficiency: ${payload.avgEfficiency.toFixed(1)}%\nUptime: ${payload.uptimePct.toFixed(1)}%\nDowntime: ${fmtDuration(payload.totalDowntimeMs)} across ${payload.downtimeCount} events\nJobs: ${payload.jobs.map((j) => `Job ${j.jobId} (${j.product}) [${j.status === 'stale' ? 'completed' : j.status}] ${j.produced}/${j.target}`).join('; ')}`;
 
   const contents: { role: string; parts: { text: string }[] }[] = [
     { role: 'user', parts: [{ text: dataContext }] },

@@ -557,8 +557,16 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
   }, [jobs]);
 
   const visibleJobs = useMemo(() => {
-    return jobFilters.length === 0 ? jobs : jobs.filter((j) => jobFilters.includes(j.jobId));
-  }, [jobs, jobFilters]);
+    const filtered = jobFilters.length === 0 ? jobs : jobs.filter((j) => jobFilters.includes(j.jobId));
+    return filtered.filter((j) => {
+      const status = deriveJobStatus(j.lastRunState, j.progressPct, j.produced, j.quantity, j.lastCapture, j.snapshots, hasNewerJobSet.has(j.jobId), plateauThreshold);
+      if (status !== 'completed') return true;
+      if (j.snapshots.length < 2) return true;
+      const producedValues = j.snapshots.map((s) => s.produced ?? -1);
+      const allSame = producedValues.every((v) => v === producedValues[0]);
+      return !allSame;
+    });
+  }, [jobs, jobFilters, plateauThreshold, hasNewerJobSet]);
 
   const visibleHourly = useMemo(() => {
     if (!data) return [];

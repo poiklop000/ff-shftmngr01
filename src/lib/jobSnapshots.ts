@@ -401,12 +401,11 @@ export function deriveJobStatus(
     const producedValues = last3.map((s) => s.produced ?? -1);
     const allSame = producedValues.every((v) => v === producedValues[0]);
     if (allSame && producedValues[0] >= 0) {
-      // Produced flat + newer job exists + progress >= threshold → finished (e.g. PAMS during CIP)
+      // Produced flat + newer job exists → job is done (regardless of threshold)
+      if (hasNewerJob) return 'completed';
+      // Produced flat + progress >= threshold → finished (e.g. CIP with no newer job yet)
       const highProgress = last3.some((s) => (s.progress_pct ?? 0) >= threshold);
-      if (highProgress) {
-        if (hasNewerJob) return 'completed';
-        return 'completed';
-      }
+      if (highProgress) return 'completed';
     }
   }
 

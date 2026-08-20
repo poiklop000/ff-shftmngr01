@@ -1448,7 +1448,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
                   {visibleHourly.map((h, i) => (
                     <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%', minWidth: 34, flexShrink: 0 }}>
                       <div
-                        title={`${hourLabels[i] ?? h.hour}: ${h.out.toLocaleString()}`}
+                        title={`${h.hour} - ${(() => { const [hh, mm] = h.hour.split(':').map(Number); return `${String((hh + 1) % 24).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; })()}: ${h.out.toLocaleString()}`}
                         style={{
                           width: 22,
                           height: `${maxHourOut > 0 ? Math.max(2, (h.out / maxHourOut) * 100) : 2}%`,
@@ -1478,7 +1478,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
                         return (
                           <tr key={i} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
                             <td className="px-4 py-3 text-slate-600">{h.startText ? h.startText.slice(0, 10) : '-'}</td>
-                            <td className="px-4 py-3 text-slate-700">{h.hour}</td>
+                            <td className="px-4 py-3 text-slate-700">{h.hour} - {(() => { const [hh, mm] = h.hour.split(':').map(Number); return `${String((hh + 1) % 24).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; })()}</td>
                             <td className="px-4 py-3 text-slate-600">{h.in.toLocaleString()}</td>
                             <td className="px-4 py-3 text-slate-700">{h.out.toLocaleString()}</td>
                             <td className="px-4 py-3 text-slate-600">{rated.toLocaleString()}</td>

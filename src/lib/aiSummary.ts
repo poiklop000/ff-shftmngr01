@@ -171,8 +171,11 @@ export function buildPrompt(s: AiSummaryPayload): string {
       for (const h of s.hourlyProduction) {
         const eff =
           h.rated > 0 ? ((h.in / h.rated) * 100).toFixed(0) : '-';
+        const [hh, mm] = h.hour.split(':').map(Number);
+        const endH = String((hh + 1) % 24).padStart(2, '0');
+        const endM = String(mm).padStart(2, '0');
         parts.push(
-          `${h.hour}: ${h.in.toLocaleString()} units (eff ${eff}%)`,
+          `${h.hour} - ${endH}:${endM}: ${h.in.toLocaleString()} units (eff ${eff}%)`,
         );
       }
     } else {

@@ -50,6 +50,7 @@ interface TopDowntimeEvent {
   type: string;
   category: string;
   reason: string;
+  startTime: string;
   comments: DowntimeEventComment[];
 }
 
@@ -212,11 +213,15 @@ export function buildPrompt(s: AiSummaryPayload): string {
   }
 
   if (s.topDowntimeEvents.length > 0) {
-    parts.push('## Top Downtime Events (with operator comments)');
+    parts.push('## Top Downtime Events');
     for (const e of s.topDowntimeEvents) {
+      const pct = s.totalDowntimeMs > 0 ? ((e.durationMs / s.totalDowntimeMs) * 100).toFixed(1) : '0';
       parts.push(
-        `- ${fmtDuration(e.durationMs)} ${e.type} [${e.category}] reason: ${e.reason || 'N/A'}`,
+        `${e.startTime} | ${fmtDuration(e.durationMs)} (${pct}% of total) | ${e.type} | ${e.category}`,
       );
+      if (e.reason) {
+        parts.push(`  Reason: ${e.reason}`);
+      }
       if (e.comments.length > 0) {
         for (const c of e.comments) {
           parts.push(`  Comment (${c.author}): "${c.text}"`);

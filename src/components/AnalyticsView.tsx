@@ -740,12 +740,13 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
     }));
     const topDowntimeEvents = [...downtime]
       .sort((a, b) => (b.duration_ms ?? 0) - (a.duration_ms ?? 0))
-      .slice(0, 10)
+      .slice(0, 15)
       .map((e) => ({
         durationMs: e.duration_ms ?? 0,
         type: e.downtime_type ?? 'UNKNOWN',
         category: e.category ?? e.reason ?? 'Unknown',
         reason: e.reason ?? '',
+        startTime: e.start_epoch ? aucklandTime(new Date(e.start_epoch).toISOString()) : '',
         comments: (e.comments ?? [])
           .filter((c) => !c.systemPost)
           .map((c) => ({ author: c.userName, text: c.text })),

@@ -148,7 +148,7 @@ export function buildPrompt(s: AiSummaryPayload): string {
       const pct = Math.min(j.progressPct, 999);
       const overnote = j.progressPct > 100 ? ` (overproduction: +${(j.produced - j.target).toLocaleString()} units)` : '';
       parts.push(
-        `Job ${j.jobId} (${j.product}) [${j.status}]: ${j.produced.toLocaleString()} / ${j.target.toLocaleString()} (${pct.toFixed(0)}%) at rated ${j.ratedSpeed.toLocaleString()}/hr${overnote}`,
+        `Job ${j.jobId} (${j.product}): ${j.produced.toLocaleString()} / ${j.target.toLocaleString()} (${pct.toFixed(2)}%) at rated ${j.ratedSpeed.toLocaleString()}/hr${overnote}`,
       );
     }
     parts.push('');
@@ -453,7 +453,7 @@ export async function* sendAiChatMessage(
   history: ChatMessage[],
   userMessage: string,
 ): AsyncGenerator<string> {
-  const dataContext = `[Production data context — do not repeat this data unless asked]\nDate range: ${payload.rangeStart} to ${payload.rangeEnd}\nTotal output: ${payload.totalOut.toLocaleString()} units\nAvg efficiency: ${payload.avgEfficiency.toFixed(1)}%\nUptime: ${payload.uptimePct.toFixed(1)}%\nDowntime: ${fmtDuration(payload.totalDowntimeMs)} across ${payload.downtimeCount} events\nJobs: ${payload.jobs.map((j) => `Job ${j.jobId} (${j.product}) [${j.status === 'stale' ? 'completed' : j.status}] ${j.produced}/${j.target}`).join('; ')}`;
+  const dataContext = `[Production data context — do not repeat this data unless asked]\nDate range: ${payload.rangeStart} to ${payload.rangeEnd}\nTotal output: ${payload.totalOut.toLocaleString()} units\nAvg efficiency: ${payload.avgEfficiency.toFixed(1)}%\nUptime: ${payload.uptimePct.toFixed(1)}%\nDowntime: ${fmtDuration(payload.totalDowntimeMs)} across ${payload.downtimeCount} events\nJobs: ${payload.jobs.map((j) => `Job ${j.jobId} (${j.product}) ${j.produced.toLocaleString()}/${j.target.toLocaleString()} (${Math.min(j.progressPct, 999).toFixed(2)}%)`).join('; ')}`;
 
   const contents: { role: string; parts: { text: string }[] }[] = [
     { role: 'user', parts: [{ text: dataContext }] },

@@ -85,6 +85,7 @@ function fmtDuration(ms: number): string {
 }
 
 export function buildPrompt(s: AiSummaryPayload): string {
+  const activeJobs = s.jobs.filter((j) => j.status !== 'stale');
   const parts: string[] = [];
   parts.push(
     'You are a factory production analyst for a canning line in New Zealand.',
@@ -94,7 +95,7 @@ export function buildPrompt(s: AiSummaryPayload): string {
   );
   parts.push('');
   parts.push(
-    'Job status meanings: [running] = job is still in progress, report current progress not final output; [completed] = job finished naturally (target reached or OFS marked complete); [setup] = line is being set up for this job; [stopped] = job halted due to breakdown, maintenance, or line down — NOT finished; [stale] = no recent data, cannot determine status.',
+    'Job status meanings: [running] = job is still in progress, report current progress not final output; [completed] = job finished naturally (target reached or OFS marked complete); [setup] = line is being set up for this job; [stopped] = job halted due to breakdown, maintenance, or line down — NOT finished.',
   );
   parts.push('');
 
@@ -132,12 +133,12 @@ export function buildPrompt(s: AiSummaryPayload): string {
     `Total downtime: ${fmtDuration(s.totalDowntimeMs)} across ${s.downtimeCount} events`,
   );
   parts.push(`Longest single downtime: ${fmtDuration(s.longestDowntimeMs)}`);
-  parts.push(`Distinct jobs: ${s.jobs.length}`);
+  parts.push(`Distinct jobs: ${activeJobs.length}`);
   parts.push('');
 
-  if (s.jobs.length > 0) {
+  if (activeJobs.length > 0) {
     parts.push('## Jobs');
-    for (const j of s.jobs) {
+    for (const j of activeJobs) {
       parts.push(
         `Job ${j.jobId} (${j.product}) [${j.status}]: ${j.produced.toLocaleString()} / ${j.target.toLocaleString()} (${j.progressPct.toFixed(0)}%) at rated ${j.ratedSpeed.toLocaleString()}/hr`,
       );
@@ -441,7 +442,7 @@ export async function* sendAiChatMessage(
   history: ChatMessage[],
   userMessage: string,
 ): AsyncGenerator<string> {
-  const dataContext = `[Production data context — do not repeat this data unless asked]\nDate range: ${payload.rangeStart} to ${payload.rangeEnd}\nTotal output: ${payload.totalOut.toLocaleString()} units\nAvg efficiency: ${payload.avgEfficiency.toFixed(1)}%\nUptime: ${payload.uptimePct.toFixed(1)}%\nDowntime: ${fmtDuration(payload.totalDowntimeMs)} across ${payload.downtimeCount} events\nJobs: ${payload.jobs.map((j) => `Job ${j.jobId} (${j.product}) [${j.status}] ${j.produced}/${j.target}`).join('; ')}`;
+  const dataContext = `[Production data context — do not repeat this data unless asked]\nDate range: ${payload.rangeStart} to ${payload.rangeEnd}\nTotal output: ${payload.totalOut.toLocaleString()} units\nAvg efficiency: ${payload.avgEfficiency.toFixed(1)}%\nUptime: ${payload.uptimePct.toFixed(1)}%\nDowntime: ${fmtDuration(payload.totalDowntimeMs)} across ${payload.downtimeCount} events\nJobs: ${payload.jobs.filter((j) => j.status !== 'stale').map((j) => `Job ${j.jobId} (${j.product}) [${j.status}] ${j.produced}/${j.target}`).join('; ')}`;
 
   const contents: { role: string; parts: { text: string }[] }[] = [
     { role: 'user', parts: [{ text: dataContext }] },

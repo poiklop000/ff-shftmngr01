@@ -746,7 +746,6 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
         type: e.downtime_type ?? 'UNKNOWN',
         category: e.category ?? e.reason ?? 'Unknown',
         reason: e.reason ?? '',
-        startTime: e.start_epoch ? aucklandTime(new Date(e.start_epoch).toISOString()) : '',
         comments: (e.comments ?? [])
           .filter((c) => !c.systemPost)
           .map((c) => ({ author: c.userName, text: c.text })),

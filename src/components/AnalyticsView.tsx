@@ -546,12 +546,22 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
 
   // When one or more jobs are selected, the whole page (jobs, downtime, hourly
   // production, result cards, exports) narrows down to just those jobs.
+  // Determine which jobs have a newer job that started after them.
+  const hasNewerJobSet = useMemo(() => {
+    const sorted = [...jobs].sort((a, b) => a.firstCapture.localeCompare(b.firstCapture));
+    const set = new Set<number>();
+    for (let i = 0; i < sorted.length - 1; i++) {
+      set.add(sorted[i].jobId);
+    }
+    return set;
+  }, [jobs]);
+
   const visibleJobs = useMemo(() => {
     const filtered = jobFilters.length === 0 ? jobs : jobs.filter((j) => jobFilters.includes(j.jobId));
     // Exclude jobs that finished before the range: status is completed AND
     // produced never changed across all snapshots (flat from the start).
     return filtered.filter((j) => {
-      const status = deriveJobStatus(j.lastRunState, j.progressPct, j.produced, j.quantity, j.lastCapture, j.snapshots, false, plateauThreshold);
+      const status = deriveJobStatus(j.lastRunState, j.progressPct, j.produced, j.quantity, j.lastCapture, j.snapshots, hasNewerJobSet.has(j.jobId), plateauThreshold);
       if (status !== 'completed') return true;
       if (j.snapshots.length < 2) return true;
       const producedValues = j.snapshots.map((s) => s.produced ?? -1);
@@ -559,7 +569,7 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
       // If produced was flat the entire time, this job finished before the range
       return !allSame;
     });
-  }, [jobs, jobFilters, plateauThreshold]);
+  }, [jobs, jobFilters, plateauThreshold, hasNewerJobSet]);
 
   const visibleHourly = useMemo(() => {
     if (!data) return [];
@@ -723,12 +733,6 @@ export function AnalyticsView({ syncTick = 0, userRole }: AnalyticsViewProps) {
       hour: h.startText ? h.startText.slice(0, 16).replace('T', ' ') : h.hour,
       in: h.in, out: h.out, rated: hourJobRates[h.start] ?? h.rated,
     }));
-    // Determine which jobs have a newer job that started after them.
-    const sortedByFirst = [...visibleJobs].sort((a, b) => a.firstCapture.localeCompare(b.firstCapture));
-    const hasNewerJobSet = new Set<number>();
-    for (let i = 0; i < sortedByFirst.length - 1; i++) {
-      hasNewerJobSet.add(sortedByFirst[i].jobId);
-    }
     const jobs = visibleJobs.map((j) => ({
       jobId: j.jobId, product: j.product, ratedSpeed: j.ratedSpeed,
       target: j.quantity, produced: j.produced, progressPct: j.progressPct,

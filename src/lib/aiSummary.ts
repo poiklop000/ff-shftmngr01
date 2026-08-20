@@ -94,7 +94,7 @@ export function buildPrompt(s: AiSummaryPayload): string {
     'Write a concise, professional summary of the production data below.',
   );
   parts.push(
-    'Do not use asterisks, bullet points, or markdown formatting. Use numbered lists or plain paragraphs only.',
+    'Use proper bullet points with a dot character (•) instead of asterisks or hash symbols. No markdown formatting.',
   );
   parts.push('');
   parts.push(
@@ -107,7 +107,7 @@ export function buildPrompt(s: AiSummaryPayload): string {
       'Format: 3-5 paragraphs covering: (1) key output and efficiency stats, (2) the biggest downtime issues, their root causes, and what operators said in comments, (3) per-shift or per-day patterns, (4) notable concerns or standout hours, (5) one actionable recommendation.',
     );
     parts.push(
-      'Use plain English with no bullet points or asterisks. Be specific with numbers. Aim for 200-300 words.',
+      'Use plain English with proper bullet points (•) instead of asterisks. Be specific with numbers. Aim for 200-300 words.',
     );
   } else {
     parts.push('Format: a structured report with these sections:');

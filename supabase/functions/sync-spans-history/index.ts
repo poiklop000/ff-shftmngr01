@@ -641,8 +641,61 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // Before upserting express records, build a lookup of existing rows by
+    // event identity (start_epoch + downtime_type) so we can carry over alert
+    // flags when OFS assigns a new span ID to the same physical event (e.g.
+    // after a shift operator change). Includes recently-resolved rows because
+    // staleLive above may have just resolved the old row in this sync run.
+    const RECENT_RESOLVE_CUTOFF = Date.now() - 30 * 60_000;
+    const { data: existingFlagRows } = await supabase
+      .from("downtime_events")
+      .select("id, start_epoch, downtime_type, alert_sent, resolved_alert_sent, last_escalation_minutes")
+      .eq("console_id", CONSOLE)
+      .or(`and(resolved.eq.false),and(resolved.eq.true,end_epoch.gte.${RECENT_RESOLVE_CUTOFF})`);
+    const alertFlagLookup = new Map<string, {
+      alert_sent: boolean;
+      resolved_alert_sent: boolean;
+      last_escalation_minutes: number | null;
+    }>();
+    for (const row of existingFlagRows ?? []) {
+      if (!row.downtime_type) continue;
+      const key = `${row.start_epoch}_${row.downtime_type}`;
+      const existing = alertFlagLookup.get(key);
+      if (!existing) {
+        alertFlagLookup.set(key, {
+          alert_sent: row.alert_sent ?? false,
+          resolved_alert_sent: row.resolved_alert_sent ?? false,
+          last_escalation_minutes: row.last_escalation_minutes ?? null,
+        });
+      } else {
+        existing.alert_sent = existing.alert_sent || (row.alert_sent ?? false);
+        existing.resolved_alert_sent = existing.resolved_alert_sent || (row.resolved_alert_sent ?? false);
+        existing.last_escalation_minutes = Math.max(
+          existing.last_escalation_minutes ?? 0,
+          row.last_escalation_minutes ?? 0,
+        ) || null;
+      }
+    }
+
+    // Fetch IDs of existing rows so we only carry over flags for NEW rows
+    const expressIds = expressRecords.map((r) => r.id).filter((id): id is number => id != null);
+    const { data: existingIds } = await supabase
+      .from("downtime_events")
+      .select("id")
+      .in("id", expressIds);
+    const existingIdSet = new Set((existingIds ?? []).map((r) => r.id));
+
     for (let i = 0; i < expressRecords.length; i += BATCH_SIZE) {
-      const batch = expressRecords.slice(i, i + BATCH_SIZE);
+      const batch = expressRecords.slice(i, i + BATCH_SIZE).map((rec) => {
+        if (rec.id != null && !existingIdSet.has(rec.id) && rec.downtime_type) {
+          const key = `${rec.start_epoch}_${rec.downtime_type}`;
+          const flags = alertFlagLookup.get(key);
+          if (flags && (flags.alert_sent || flags.resolved_alert_sent)) {
+            return { ...rec, ...flags };
+          }
+        }
+        return rec;
+      });
       const { data, error } = await supabase
         .from("downtime_events")
         .upsert(batch, {

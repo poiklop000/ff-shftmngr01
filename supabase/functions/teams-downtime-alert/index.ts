@@ -947,6 +947,20 @@ Deno.serve(async (req: Request) => {
           skippedCount++;
           continue;
         }
+        // Optimistic lock: claim alert_sent=true BEFORE sending so concurrent
+        // cron runs skip this event. Revert on failure so a retry is possible.
+        const crossed = escalationMinutes.filter((m) => effectiveDurationMs >= m * 60_000);
+        const lastEscalation = crossed.length > 0 ? Math.max(...crossed) : null;
+        for (const m of members) {
+          await supabase
+            .from("downtime_events")
+            .update({
+              alert_sent: true,
+              last_escalation_minutes: lastEscalation,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", m.id);
+        }
         const payload = runningSlow
           ? buildRunningSlowOccurredMessage(enriched, ctx)
           : buildOccurredMessage(enriched, ctx);
@@ -964,22 +978,19 @@ Deno.serve(async (req: Request) => {
           httpStatus: res.httpStatus,
         });
         if (res.ok) {
-          // If the event is already past an escalation level, record the highest
-          // one so a duplicate "still ongoing" alert isn't sent immediately.
-          const crossed = escalationMinutes.filter((m) => effectiveDurationMs >= m * 60_000);
-          const lastEscalation = crossed.length > 0 ? Math.max(...crossed) : null;
+          occurredCount++;
+        } else {
+          // Revert the claim so the next run can retry.
           for (const m of members) {
             await supabase
               .from("downtime_events")
               .update({
-                alert_sent: true,
-                last_escalation_minutes: lastEscalation,
+                alert_sent: false,
+                last_escalation_minutes: enriched.last_escalation_minutes ?? null,
                 updated_at: new Date().toISOString(),
               })
               .eq("id", m.id);
           }
-          occurredCount++;
-        } else {
           failed.push(evt.id);
         }
       }
@@ -1001,6 +1012,13 @@ Deno.serve(async (req: Request) => {
           continue;
         }
         const payload = buildResolvedMessage(enriched, ctx);
+        // Optimistic lock: claim resolved_alert_sent=true BEFORE sending.
+        for (const m of members) {
+          await supabase
+            .from("downtime_events")
+            .update({ resolved_alert_sent: true, updated_at: new Date().toISOString() })
+            .eq("id", m.id);
+        }
         const res = await sendTeams(webhookUrl, payload);
         await logAlert(supabase, {
           alertType: "resolved",
@@ -1013,14 +1031,15 @@ Deno.serve(async (req: Request) => {
           httpStatus: res.httpStatus,
         });
         if (res.ok) {
+          resolvedCount++;
+        } else {
+          // Revert so the next run can retry.
           for (const m of members) {
             await supabase
               .from("downtime_events")
-              .update({ resolved_alert_sent: true, updated_at: new Date().toISOString() })
+              .update({ resolved_alert_sent: false, updated_at: new Date().toISOString() })
               .eq("id", m.id);
           }
-          resolvedCount++;
-        } else {
           failed.push(enriched.id);
         }
       }
@@ -1039,6 +1058,14 @@ Deno.serve(async (req: Request) => {
         );
         if (crossed.length > 0) {
           const m = crossed[crossed.length - 1]!;
+          // Optimistic lock: claim last_escalation_minutes BEFORE sending.
+          const prevEsc = enriched.last_escalation_minutes ?? null;
+          for (const mb of members) {
+            await supabase
+              .from("downtime_events")
+              .update({ last_escalation_minutes: m, updated_at: new Date().toISOString() })
+              .eq("id", mb.id);
+          }
           const payload = buildEscalationMessage(enriched, ctx, m);
           const res = await sendTeams(webhookUrl, payload);
           await logAlert(supabase, {
@@ -1052,14 +1079,15 @@ Deno.serve(async (req: Request) => {
             httpStatus: res.httpStatus,
           });
           if (res.ok) {
+            escalationCount++;
+          } else {
+            // Revert so the next run can retry.
             for (const mb of members) {
               await supabase
                 .from("downtime_events")
-                .update({ last_escalation_minutes: m, updated_at: new Date().toISOString() })
+                .update({ last_escalation_minutes: prevEsc, updated_at: new Date().toISOString() })
                 .eq("id", mb.id);
             }
-            escalationCount++;
-          } else {
             failed.push(enriched.id);
           }
         }

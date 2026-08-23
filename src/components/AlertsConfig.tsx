@@ -111,11 +111,12 @@ export function AlertsConfig() {
     setError(null);
     setSaved(false);
     try {
+      const errors: string[] = [];
       const upsert = async (key: string, value: string) => {
         const { error: e } = await supabase
           .from('app_config')
           .upsert({ key, value }, { onConflict: 'key' });
-        if (e) throw new Error(e.message);
+        if (e) errors.push(`${key}: ${e.message}`);
       };
       await upsert('teams_webhook_url', trimmed);
       await upsert('teams_alerts_enabled', String(enabled));
@@ -126,6 +127,7 @@ export function AlertsConfig() {
       await upsert('teams_recurring_alert_initial_threshold', Number.isFinite(parsedRecurring) && parsedRecurring >= 2 ? String(parsedRecurring) : '5');
       await upsert('teams_alert_escalation_minutes', safeEscalation);
       await saveLiveIntervals(liveSecsNum * 1000, summarySecsNum * 1000);
+      if (errors.length > 0) throw new Error(errors.join('; '));
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {

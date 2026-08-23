@@ -947,6 +947,26 @@ Deno.serve(async (req: Request) => {
           skippedCount++;
           continue;
         }
+        // Race-condition guard: re-fetch the primary member's current state.
+        // OFS may have resolved the event after our initial query but before
+        // capture-downtime recorded it. If it's now resolved and the actual
+        // duration is under threshold, skip — the alert would be a false
+        // positive caused by the capture-function lag.
+        const faceId = members[0]?.id;
+        if (faceId) {
+          const { data: freshRow } = await supabase
+            .from("downtime_events")
+            .select("resolved, start_epoch, end_epoch")
+            .eq("id", faceId)
+            .maybeSingle();
+          if (freshRow?.resolved && freshRow.end_epoch) {
+            const actualMs = freshRow.end_epoch - freshRow.start_epoch;
+            if (actualMs < thresholdMs) {
+              skippedCount++;
+              continue;
+            }
+          }
+        }
         // Optimistic lock: claim alert_sent=true BEFORE sending so concurrent
         // cron runs skip this event. Revert on failure so a retry is possible.
         const crossed = escalationMinutes.filter((m) => effectiveDurationMs >= m * 60_000);

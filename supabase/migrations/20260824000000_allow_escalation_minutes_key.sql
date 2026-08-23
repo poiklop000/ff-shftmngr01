@@ -1,4 +1,5 @@
--- Allow teams_alert_escalation_minutes in app_config INSERT/UPDATE RLS policies.
+-- Fix app_config RLS: add live_refresh_ms and live_summary_refresh_ms to allowlist.
+-- Also includes teams_alert_escalation_minutes added earlier.
 
 DROP POLICY IF EXISTS "anon_insert_app_config" ON app_config;
 CREATE POLICY "anon_insert_app_config" ON app_config FOR INSERT
@@ -18,6 +19,8 @@ CREATE POLICY "anon_insert_app_config" ON app_config FOR INSERT
     'board_alert_threshold_minutes',
     'alert_configs',
     'live_refresh_interval_ms',
+    'live_refresh_ms',
+    'live_summary_refresh_ms',
     'ai_model',
     'plateau_threshold_pct'
   ));
@@ -40,6 +43,8 @@ CREATE POLICY "anon_update_app_config" ON app_config FOR UPDATE
     'board_alert_threshold_minutes',
     'alert_configs',
     'live_refresh_interval_ms',
+    'live_refresh_ms',
+    'live_summary_refresh_ms',
     'ai_model',
     'plateau_threshold_pct'
   ))
@@ -58,6 +63,8 @@ CREATE POLICY "anon_update_app_config" ON app_config FOR UPDATE
     'board_alert_threshold_minutes',
     'alert_configs',
     'live_refresh_interval_ms',
+    'live_refresh_ms',
+    'live_summary_refresh_ms',
     'ai_model',
     'plateau_threshold_pct'
   ));

@@ -155,7 +155,7 @@ export function DowntimeTimeline({
   lineState,
   snapshots,
 }: DowntimeTimelineProps) {
-  const { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount, status, bgSegments } = useMemo(() => {
+  const { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount, status, bgSegments, snapshotBased } = useMemo(() => {
     const hours = getActiveHours(currentShift, customHours);
     if (hours.length === 0 || !date) {
       return {
@@ -167,6 +167,7 @@ export function DowntimeTimeline({
         eventCount: 0,
         status: 'unknown' as ShiftTimeStatus,
         bgSegments: [] as Array<{ leftPct: number; widthPct: number; color: string; label: string }>,
+        snapshotBased: false,
       };
     }
 
@@ -242,6 +243,7 @@ export function DowntimeTimeline({
     // (running, idle, setup, downtime, planned, slow) rather than just a
     // single green→grey transition.
     const bgSegments: Array<{ leftPct: number; widthPct: number; color: string; label: string }> = [];
+    let snapshotBased = false;
     if (status !== 'not-started' && effectiveEndPct !== null && snapshots && snapshots.length > 0) {
       // Map each snapshot to its shift-minute position and classified state
       const classified: Array<{ shiftMin: number; state: LineStateClass }> = [];
@@ -285,6 +287,7 @@ export function DowntimeTimeline({
             label: seg.state.charAt(0).toUpperCase() + seg.state.slice(1),
           });
         }
+        snapshotBased = true;
       }
     }
 
@@ -293,7 +296,7 @@ export function DowntimeTimeline({
       bgSegments.push({ leftPct: 0, widthPct: effectiveEndPct, color: runColor, label: lineState === 'idle' ? 'Idle' : 'Producing' });
     }
 
-    return { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount: blocks.length, status, bgSegments };
+    return { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount: blocks.length, status, bgSegments, snapshotBased };
   }, [events, currentShift, customHours, date, consoleTime, lineState, snapshots]);
 
   return (
@@ -365,7 +368,7 @@ export function DowntimeTimeline({
               />
             ))}
 
-            {blocks.map((b, i) => (
+            {!snapshotBased && blocks.map((b, i) => (
               <div
                 key={i}
                 className="absolute top-1 bottom-1 rounded-sm transition-opacity hover:opacity-80 cursor-default"

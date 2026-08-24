@@ -13,7 +13,7 @@ import { ShiftTable } from '@/components/ShiftTable';
 import { DowntimeTimeline } from '@/components/DowntimeTimeline';
 import { PageHelp } from '@/components/PageHelp';
 import { fetchDowntimeForShift, downtimeEventEndText, type DowntimeEvent } from '@/lib/downtime';
-import { fetchOfsStatus, type OfsLiveStatus } from '@/lib/ofs';
+import { classifyLineState, fetchOfsStatus, type OfsLiveStatus } from '@/lib/ofs';
 import { fetchJobsForShift } from '@/lib/jobSnapshots';
 import { useAutoGrow } from '@/lib/ui';
 
@@ -75,6 +75,7 @@ export function MonitoringView({
   const [timelineEvents, setTimelineEvents] = useState<DowntimeEvent[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [consoleTime, setConsoleTime] = useState('-');
+  const [lineState, setLineState] = useState<string>('');
   const [jobsLoading, setJobsLoading] = useState(false);
   const [jobsError, setJobsError] = useState<string | null>(null);
 
@@ -152,6 +153,7 @@ export function MonitoringView({
         if (cancelled) return;
         const t = data.workcentre?.consoletimeText || data.timestampText || '-';
         setConsoleTime(t);
+        setLineState(classifyLineState(data?.runstate));
       } catch {
         // leave existing console time if the fetch fails
       }
@@ -523,6 +525,7 @@ export function MonitoringView({
         date={date}
         consoleTime={consoleTime}
         loading={timelineLoading}
+        lineState={lineState}
       />
 
       <ShiftTable

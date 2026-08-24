@@ -17,12 +17,10 @@ import type { BoardShiftLayout } from '@/lib/boardConfig';
 import {
   classifyLineState,
   fetchOfsStatus,
-  fetchOfsSpans,
   LINE_STATE_COLORS,
   type LineStateClass,
   type OfsLiveStatus,
   type OfsRunState,
-  type OfsSpanItem,
 } from '@/lib/ofs';
 import { loadJobOverride, type JobOverride } from '@/lib/jobOverrides';
 import { fetchDowntimeForShift, downtimeEventEndText, type DowntimeEvent } from '@/lib/downtime';
@@ -187,7 +185,6 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
   const [now, setNow] = useState(Date.now());
   const [mainView, setMainView] = useState<BoardMainView>('status');
   const [viewSwitchAt, setViewSwitchAt] = useState(Date.now() + transitionMs);
-  const [spanItems, setSpanItems] = useState<OfsSpanItem[]>([]);
 
   // 3x8 layout shows the three 8-hour shift tables instead of the current
   // 12-hour shift table (plus its previous shift).
@@ -201,12 +198,8 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
 
   const load = useCallback(async () => {
     try {
-      const [data, spansData] = await Promise.all([
-        fetchOfsStatus(),
-        fetchOfsSpans().catch(() => null),
-      ]);
+      const data = await fetchOfsStatus();
       setStatus(data);
-      if (spansData?.items) setSpanItems(spansData.items);
       setError(null);
       setLastUpdated(new Date());
     } catch (err) {
@@ -692,7 +685,8 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
                 consoleTime={consoleTime}
                 loading={boardLoading}
                 lineState={lineStateClass}
-                spanItems={spanItems}
+                runStateStart={runstate?.start}
+                runStateDuration={runstate?.duration}
               />
             </div>
           </div>

@@ -2,7 +2,6 @@ import { useMemo } from 'react';
 import { Activity, Loader2 } from 'lucide-react';
 import { consoleTimeToShiftMinutes, getActiveHours, type Shift } from '@/types';
 import type { DowntimeEvent } from '@/lib/downtime';
-import type { OfsSpanItem } from '@/lib/ofs';
 
 const TYPE_COLORS: Record<string, string> = {
   UNPLANNED: '#dc2626',
@@ -22,6 +21,22 @@ function getTypeColor(type: string | null): string {
 function timeStrToMinutes(time: string): number {
   const [h, m] = time.split(':').map(Number);
   return (h ?? 0) * 60 + (m ?? 0);
+}
+
+function formatEpoch(epochMs: number): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Pacific/Auckland',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(epochMs));
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00';
+  const hour = get('hour') === '24' ? '00' : get('hour');
+  return `${get('year')}-${get('month')}-${get('day')} ${hour}:${get('minute')}:${get('second')}`;
 }
 
 function formatHour(min: number): string {
@@ -127,7 +142,7 @@ interface DowntimeTimelineProps {
   consoleTime: string;
   loading?: boolean;
   lineState?: string;
-  spanItems?: OfsSpanItem[];
+  runStateStart?: number;
 }
 
 export function DowntimeTimeline({
@@ -138,7 +153,8 @@ export function DowntimeTimeline({
   consoleTime,
   loading,
   lineState,
-  spanItems,
+  runStateStart,
+  runStateDuration,
 }: DowntimeTimelineProps) {
   const { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount, status, bgSegments } = useMemo(() => {
     const hours = getActiveHours(currentShift, customHours);
@@ -217,47 +233,25 @@ export function DowntimeTimeline({
     const runWidthPct = status === 'not-started' ? 0 : nowPct !== null ? nowPct : 100;
     const runColor = lineState === 'idle' ? IDLE_COLOR : RUNNING_COLOR;
 
-    // Build background segments from OFS live/spans items.  Each span that
-    // falls within the shift window becomes a coloured segment (green for
-    // running, grey for idle/other).  When no spanItems are provided we fall
-    // back to the single solid bar (runWidthPct / runColor).
+    // Build background segments.  Before the current runstate started, the
+    // line was producing (green).  From runstate.start to now, the colour
+    // depends on whether the line is currently running (green) or idle (grey).
+    // This matches what OFS shows: green for production, grey only for idle.
     const bgSegments: Array<{ leftPct: number; widthPct: number; color: string; label: string }> = [];
-    if (spanItems && spanItems.length > 0 && status !== 'not-started') {
-      for (const sp of spanItems) {
-        if (!sp.start || !sp.duration) continue;
-        if (!sp.startText) continue;
-        const spStartMin = consoleTimeToShiftMinutes(sp.startText, date);
-        const spEndMin = spStartMin + sp.duration / 60000;
-        if (spEndMin <= shiftStartMin || spStartMin >= shiftEndMin) continue;
-        const clampedS = Math.max(spStartMin, shiftStartMin);
-        const clampedE = Math.min(spEndMin, shiftEndMin);
-        const durMin = clampedE - clampedS;
-        if (durMin <= 0) continue;
-
-        const leftPct = ((clampedS - shiftStartMin) / totalMin) * 100;
-        const widthPct = (durMin / totalMin) * 100;
-        const st = (sp.state ?? '').toLowerCase();
-        const isRunning = st.includes('running') && !st.includes('slow');
-        const color = isRunning ? RUNNING_COLOR : IDLE_COLOR;
-        bgSegments.push({ leftPct, widthPct: Math.max(widthPct, 0.1), color, label: sp.state ?? '' });
+    if (status !== 'not-started' && runStateStart && runStateStart > 0 && nowPct !== null) {
+      const stateStartPct = computeNowPct(formatEpoch(runStateStart), date, shiftStartMin, shiftEndMin, totalMin);
+      if (stateStartPct !== null && stateStartPct > 0) {
+        // Before the current state began: green (was producing)
+        bgSegments.push({ leftPct: 0, widthPct: stateStartPct, color: RUNNING_COLOR, label: 'Producing' });
+        // Current state period: green if running, grey if idle
+        const currentColor = lineState === 'idle' ? IDLE_COLOR : RUNNING_COLOR;
+        const currentLabel = lineState === 'idle' ? 'Idle' : 'Producing';
+        bgSegments.push({ leftPct: stateStartPct, widthPct: nowPct - stateStartPct, color: currentColor, label: currentLabel });
       }
-      // Merge adjacent segments of the same colour
-      bgSegments.sort((a, b) => a.leftPct - b.leftPct);
-      const merged: typeof bgSegments = [];
-      for (const seg of bgSegments) {
-        const last = merged[merged.length - 1];
-        if (last && last.color === seg.color && Math.abs((last.leftPct + last.widthPct) - seg.leftPct) < 0.15) {
-          last.widthPct = seg.leftPct + seg.widthPct - last.leftPct;
-        } else {
-          merged.push({ ...seg });
-        }
-      }
-      bgSegments.length = 0;
-      bgSegments.push(...merged);
     }
 
     return { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount: blocks.length, status, bgSegments };
-  }, [events, currentShift, customHours, date, consoleTime, lineState, spanItems]);
+  }, [events, currentShift, customHours, date, consoleTime, lineState, runStateStart, nowPct]);
 
   return (
     <div className="card rounded-lg p-4 mb-4 border border-slate-200 bg-white">

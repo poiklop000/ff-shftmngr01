@@ -16,7 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { loadLiveIntervals } from '@/lib/liveConfig';
-import { fetchOfsStatus, fetchOfsSpans, classifyLineState, LINE_STATE_COLORS, type OfsLiveStatus, type OfsRunState, type OfsSpanItem, type LineStateClass } from '@/lib/ofs';
+import { fetchOfsStatus, classifyLineState, LINE_STATE_COLORS, type OfsLiveStatus, type OfsRunState, type LineStateClass } from '@/lib/ofs';
 import { loadJobOverride, saveJobOverride, deleteJobOverride, type JobOverride } from '@/lib/jobOverrides';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
 import { fetchHourlyRatedSpeeds } from '@/lib/jobSnapshots';
@@ -74,7 +74,6 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
   const [overrideSaving, setOverrideSaving] = useState(false);
   const [overrideError, setOverrideError] = useState<string | null>(null);
   const [overrideMsg, setOverrideMsg] = useState<string | null>(null);
-  const [spanItems, setSpanItems] = useState<OfsSpanItem[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
@@ -82,12 +81,8 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     try {
-      const [data, spansData] = await Promise.all([
-        fetchOfsStatus(ctrl.signal),
-        fetchOfsSpans(ctrl.signal).catch(() => null),
-      ]);
+      const data = await fetchOfsStatus(ctrl.signal);
       setStatus(data);
-      if (spansData?.items) setSpanItems(spansData.items);
       setError(null);
       setLastUpdated(new Date());
     } catch (err) {
@@ -559,7 +554,8 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
         consoleTime={consoleTime}
         loading={downtimeLoading}
         lineState={lineStateClass}
-        spanItems={spanItems}
+        runStateStart={runstate?.start}
+        runStateDuration={runstate?.duration}
       />
 
       <div className="flex flex-wrap items-center gap-3 mb-4 text-[11px] font-semibold">

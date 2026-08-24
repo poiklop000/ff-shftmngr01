@@ -377,7 +377,8 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
   const target = job?.quantity ?? 0;
   const ofsProductName = product?.description || order?.name || '';
   const ofsRatedSpeed = job?.metadata?.ratedSpeed ? parseInt(job.metadata.ratedSpeed, 10) : 0;
-  const productName = override?.product_name?.trim() || ofsProductName || 'No active job';
+  const isIdle = lineStateClass === 'idle';
+  const productName = isIdle ? 'No active job' : (override?.product_name?.trim() || ofsProductName || 'No active job');
   const ratedSpeed = override?.rated_speed ?? ofsRatedSpeed;
   const jobCounts = job?.counts ?? {};
   const unitsIn = status?.process?.unitsin?.value ?? 0;

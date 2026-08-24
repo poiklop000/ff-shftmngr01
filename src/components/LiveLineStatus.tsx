@@ -174,7 +174,9 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
   const target = job?.quantity ?? 0;
   const ofsProductName = product?.description || order?.name || '';
   const ofsRatedSpeed = job?.metadata?.ratedSpeed ? parseInt(job.metadata.ratedSpeed, 10) : 0;
-  const productName = override?.product_name?.trim() || ofsProductName || 'No active job';
+  const lineStateClass = classifyLineState(status?.runstate);
+  const isIdle = lineStateClass === 'idle';
+  const productName = isIdle ? 'No active job' : (override?.product_name?.trim() || ofsProductName || 'No active job');
   const ratedSpeed = override?.rated_speed ?? ofsRatedSpeed;
   const jobCounts = job?.counts ?? {};
 
@@ -205,7 +207,6 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
   const shiftOut = shiftCounts.out ?? 0;
 
   const runstate = status?.runstate;
-  const lineStateClass = classifyLineState(runstate);
   const stateColor = LINE_STATE_COLORS[lineStateClass];
 
   const currentRate = status?.process?.throughunitpersister?.rate ?? 0;

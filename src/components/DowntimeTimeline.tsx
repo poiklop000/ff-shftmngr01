@@ -221,11 +221,7 @@ export function DowntimeTimeline({
 
       const last = sorted[0];
       if (last && !last.resolved) {
-        const idleStartPct = Math.max(((last.startMin - shiftStartMin) / totalMin) * 100, 0);
-        bgSegments = [
-          { leftPct: 0, widthPct: idleStartPct, color: RUNNING_COLOR },
-          { leftPct: idleStartPct, widthPct: 100 - idleStartPct, color: IDLE_COLOR },
-        ];
+        bgSegments = [{ leftPct: 0, widthPct: 100, color: RUNNING_COLOR }];
       } else if (last) {
         const eventEndMin = Math.min(last.endMin, shiftEndMin);
         const idleStartPct = ((eventEndMin - shiftStartMin) / totalMin) * 100;

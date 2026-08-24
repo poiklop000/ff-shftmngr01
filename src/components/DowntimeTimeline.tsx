@@ -251,7 +251,7 @@ export function DowntimeTimeline({
     }
 
     return { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount: blocks.length, status, bgSegments };
-  }, [events, currentShift, customHours, date, consoleTime, lineState, runStateStart, nowPct]);
+  }, [events, currentShift, customHours, date, consoleTime, lineState, runStateStart]);
 
   return (
     <div className="card rounded-lg p-4 mb-4 border border-slate-200 bg-white">

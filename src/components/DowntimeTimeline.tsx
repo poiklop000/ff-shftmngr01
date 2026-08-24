@@ -2,8 +2,6 @@ import { useMemo } from 'react';
 import { Activity, Loader2 } from 'lucide-react';
 import { consoleTimeToShiftMinutes, getActiveHours, type Shift } from '@/types';
 import type { DowntimeEvent } from '@/lib/downtime';
-import { LINE_STATE_COLORS, type LineStateClass } from '@/lib/ofs';
-import type { SnapshotStateRow } from '@/lib/jobSnapshots';
 
 const TYPE_COLORS: Record<string, string> = {
   UNPLANNED: '#dc2626',
@@ -12,22 +10,8 @@ const TYPE_COLORS: Record<string, string> = {
   RUNNING_SLOW: '#9acd32',
 };
 
-const RUNNING_COLOR = LINE_STATE_COLORS.running;
-const IDLE_COLOR = LINE_STATE_COLORS.idle;
-
-function classifySnapshotRunState(state: string | null | undefined): LineStateClass {
-  if (!state) return 'running';
-  const s = state.toLowerCase();
-  if (s.includes('setup')) return 'setup';
-  if (s.includes('unplanned')) return 'downtime';
-  if (s.includes('planned')) return 'planned';
-  if (s.includes('downtime') || s.includes('down')) return 'downtime';
-  if (s.includes('slow')) return 'slow';
-  if (s.includes('run') || s.includes('producing') || s.includes('production')) return 'running';
-  if (s.includes('stop') || s.includes('finish') || s.includes('complete') || s.includes('held') || s.includes('hold') || s.includes('idle') || s.includes('standby') || s.includes('wait')) return 'idle';
-  if (s.includes('cleaning') || s.includes('maintenance') || s.includes('break') || s.includes('lunch')) return 'idle';
-  return 'running';
-}
+const RUNNING_COLOR = '#16a34a';
+const IDLE_COLOR = '#94a3b8';
 
 function getTypeColor(type: string | null): string {
   if (!type) return '#94a3b8';
@@ -74,10 +58,6 @@ function computeNowPct(
   if (dateMatch) {
     const consoleDate = dateMatch[1]!;
     if (consoleDate === shiftDate) {
-      // Time on the shift's own start date that falls before shiftStart means
-      // the shift has not begun yet (overnight shifts start in the evening),
-      // so there is no "now" inside the window. Keep shiftMin = minOfDay and
-      // let the bounds check below return null.
     } else if (isOvernight) {
       const [sy, sm, sd] = shiftDate.split('-').map(Number);
       const [ey, em, ed] = consoleDate.split('-').map(Number);
@@ -102,10 +82,6 @@ function computeNowPct(
 
 type ShiftTimeStatus = 'not-started' | 'in-progress' | 'ended' | 'unknown';
 
-// Classifies where "now" (the live console time) sits relative to the selected
-// shift window. A shift whose date is in the future — or whose start time on
-// its own date hasn't arrived yet (e.g. Night 18:00 viewed at 05:08) — is
-// "not-started": no events can have occurred in it, so nothing should render.
 function getShiftTimeStatus(
   consoleTime: string,
   shiftDate: string,
@@ -142,7 +118,6 @@ interface DowntimeTimelineProps {
   consoleTime: string;
   loading?: boolean;
   lineState?: string;
-  snapshots?: SnapshotStateRow[];
 }
 
 export function DowntimeTimeline({
@@ -153,9 +128,8 @@ export function DowntimeTimeline({
   consoleTime,
   loading,
   lineState,
-  snapshots,
 }: DowntimeTimelineProps) {
-  const { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount, status, bgSegments, snapshotBased } = useMemo(() => {
+  const { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount, status } = useMemo(() => {
     const hours = getActiveHours(currentShift, customHours);
     if (hours.length === 0 || !date) {
       return {
@@ -163,11 +137,10 @@ export function DowntimeTimeline({
         hourMarks: [] as HourMark[],
         nowPct: null,
         runWidthPct: 100,
+        runColor: RUNNING_COLOR,
         totalDowntimeMin: 0,
         eventCount: 0,
         status: 'unknown' as ShiftTimeStatus,
-        bgSegments: [] as Array<{ leftPct: number; widthPct: number; color: string; label: string }>,
-        snapshotBased: false,
       };
     }
 
@@ -188,8 +161,6 @@ export function DowntimeTimeline({
 
     const blocks: TimelineBlock[] = [];
     let totalDowntimeMin = 0;
-    // A shift that hasn't started yet has no events of its own; events fetched
-    // for its date are leftovers from the previous shift's tail, so show none.
     if (status !== 'not-started') {
       for (const evt of events) {
         if (!evt.start_text) continue;
@@ -231,73 +202,33 @@ export function DowntimeTimeline({
       });
     }
 
-    // For ended shifts the current time is past the window so nowPct is null;
-    // use 100 % so the bar still covers the full shift.
     const effectiveEndPct = nowPct !== null ? nowPct : (status === 'ended' ? 100 : null);
     const runWidthPct = status === 'not-started' ? 0 : effectiveEndPct ?? 100;
-    const runColor = lineState === 'idle' ? IDLE_COLOR : RUNNING_COLOR;
 
-    // Build multi-segment background from job_snapshots (minute-resolution
-    // run_state data).  Each consecutive run of the same classified state
-    // becomes one coloured segment — giving a full history of state changes
-    // (running, idle, setup, downtime, planned, slow) rather than just a
-    // single green→grey transition.
-    const bgSegments: Array<{ leftPct: number; widthPct: number; color: string; label: string }> = [];
-    let snapshotBased = false;
-    if (status !== 'not-started' && effectiveEndPct !== null && snapshots && snapshots.length > 0) {
-      // Map each snapshot to its shift-minute position and classified state
-      const classified: Array<{ shiftMin: number; state: LineStateClass }> = [];
-      for (const snap of snapshots) {
-        if (!snap.captureTime) continue;
-        const min = consoleTimeToShiftMinutes(snap.captureTime, date);
-        if (min < shiftStartMin || min > shiftEndMin) continue;
-        classified.push({ shiftMin: min, state: classifySnapshotRunState(snap.runState) });
-      }
-
-      if (classified.length > 0) {
-        // Merge consecutive snapshots with the same state into segments
-        const segments: Array<{ startMin: number; endMin: number; state: LineStateClass }> = [];
-        let cur = classified[0]!;
-        let segStart = cur.shiftMin;
-        let segState = cur.state;
-
-        for (let i = 1; i < classified.length; i++) {
-          const next = classified[i]!;
-          if (next.state !== segState) {
-            segments.push({ startMin: segStart, endMin: next.shiftMin, state: segState });
-            segStart = next.shiftMin;
-            segState = next.state;
-          }
-        }
-        segments.push({ startMin: segStart, endMin: classified[classified.length - 1]!.shiftMin, state: segState });
-
-        // Extend the first segment back to shift start and the last to effectiveEnd
-        const effectiveEndMin = shiftStartMin + (effectiveEndPct / 100) * totalMin;
-
-        for (const seg of segments) {
-          const leftMin = seg === segments[0] ? shiftStartMin : seg.startMin;
-          const rightMin = seg === segments[segments.length - 1] ? effectiveEndMin : seg.endMin;
-          const leftPct = ((leftMin - shiftStartMin) / totalMin) * 100;
-          const widthPct = Math.max(((rightMin - leftMin) / totalMin) * 100, 0);
-          if (widthPct <= 0) continue;
-          bgSegments.push({
-            leftPct,
-            widthPct,
-            color: LINE_STATE_COLORS[seg.state],
-            label: seg.state.charAt(0).toUpperCase() + seg.state.slice(1),
-          });
-        }
-        snapshotBased = true;
+    // For today's in-progress shift, use the live lineState from OFS.
+    // For past ended shifts, infer from downtime events: if the last event
+    // is unresolved (no end time), the line was idle at shift end; otherwise
+    // it was running.  This avoids showing a false grey bar for the entire
+    // past shift when the live runstate always reads "idle".
+    let effectiveLineState = lineState;
+    if (status === 'ended' && effectiveLineState === 'idle') {
+      const shiftEvents = events.filter((e) => {
+        if (!e.start_text) return false;
+        const min = consoleTimeToShiftMinutes(e.start_text, date);
+        return min >= shiftStartMin && min <= shiftEndMin;
+      });
+      const lastEvent = shiftEvents.length > 0
+        ? shiftEvents.reduce((a, b) => (a.start_epoch > b.start_epoch ? a : b))
+        : null;
+      if (!lastEvent || lastEvent.resolved) {
+        effectiveLineState = 'running';
       }
     }
 
-    // Fallback: no snapshot data — use the old single-transition heuristic
-    if (bgSegments.length === 0 && status !== 'not-started' && effectiveEndPct !== null) {
-      bgSegments.push({ leftPct: 0, widthPct: effectiveEndPct, color: runColor, label: lineState === 'idle' ? 'Idle' : 'Producing' });
-    }
+    const runColor = effectiveLineState === 'idle' ? IDLE_COLOR : RUNNING_COLOR;
 
-    return { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount: blocks.length, status, bgSegments, snapshotBased };
-  }, [events, currentShift, customHours, date, consoleTime, lineState, snapshots]);
+    return { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount: blocks.length, status };
+  }, [events, currentShift, customHours, date, consoleTime, lineState]);
 
   return (
     <div className="card rounded-lg p-4 mb-4 border border-slate-200 bg-white">
@@ -337,28 +268,14 @@ export function DowntimeTimeline({
           </div>
 
           <div className="relative h-9 rounded-md bg-slate-100 border border-slate-200 overflow-hidden">
-            {bgSegments.length > 0 ? (
-              bgSegments.map((seg, i) => (
-                <div
-                  key={`bg-${i}`}
-                  className="absolute top-0 bottom-0"
-                  style={{
-                    left: `${seg.leftPct}%`,
-                    width: `${seg.widthPct}%`,
-                    backgroundColor: seg.color,
-                  }}
-                />
-              ))
-            ) : (
-              <div
-                className="absolute top-0 bottom-0 rounded-l-md"
-                style={{
-                  left: '0%',
-                  width: `${runWidthPct}%`,
-                  backgroundColor: runColor,
-                }}
-              />
-            )}
+            <div
+              className="absolute top-0 bottom-0 rounded-l-md"
+              style={{
+                left: '0%',
+                width: `${runWidthPct}%`,
+                backgroundColor: runColor,
+              }}
+            />
 
             {hourMarks.map((m, i) => (
               <div
@@ -368,7 +285,7 @@ export function DowntimeTimeline({
               />
             ))}
 
-            {!snapshotBased && blocks.map((b, i) => (
+            {blocks.map((b, i) => (
               <div
                 key={i}
                 className="absolute top-1 bottom-1 rounded-sm transition-opacity hover:opacity-80 cursor-default"

@@ -19,7 +19,7 @@ import { loadLiveIntervals } from '@/lib/liveConfig';
 import { fetchOfsStatus, classifyLineState, LINE_STATE_COLORS, type OfsLiveStatus, type OfsRunState, type LineStateClass } from '@/lib/ofs';
 import { loadJobOverride, saveJobOverride, deleteJobOverride, type JobOverride } from '@/lib/jobOverrides';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
-import { fetchHourlyRatedSpeeds, fetchSnapshotsForShiftState, type SnapshotStateRow } from '@/lib/jobSnapshots';
+import { fetchHourlyRatedSpeeds } from '@/lib/jobSnapshots';
 import { fetchDowntimeByDate, downtimeEventEndText, type DowntimeEvent } from '@/lib/downtime';
 import { filterByShiftWindow, getActiveHours, SHIFT_LABELS, type Shift } from '@/types';
 import { DowntimeTimeline } from '@/components/DowntimeTimeline';
@@ -65,7 +65,6 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [downtimeEvents, setDowntimeEvents] = useState<DowntimeEvent[]>([]);
   const [downtimeLoading, setDowntimeLoading] = useState(false);
-  const [snapshots, setSnapshots] = useState<SnapshotStateRow[]>([]);
   const [liveRefreshMs, setLiveRefreshMs] = useState(DEFAULT_LIVE_MS);
   const [summaryRefreshMs, setSummaryRefreshMs] = useState(DEFAULT_SUMMARY_MS);
   const [override, setOverride] = useState<JobOverride | null>(null);
@@ -166,20 +165,6 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
     const id = setInterval(() => loadDowntime(date), summaryRefreshMs);
     return () => clearInterval(id);
   }, [loadDowntime, date, summaryRefreshMs]);
-
-  useEffect(() => {
-    if (!date) return;
-    let cancelled = false;
-    fetchSnapshotsForShiftState(date, currentShift, customHours)
-      .then((rows) => { if (!cancelled) setSnapshots(rows); })
-      .catch(() => { if (!cancelled) setSnapshots([]); });
-    const id = setInterval(() => {
-      fetchSnapshotsForShiftState(date, currentShift, customHours)
-        .then((rows) => { if (!cancelled) setSnapshots(rows); })
-        .catch(() => {});
-    }, summaryRefreshMs);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [date, currentShift, customHours, summaryRefreshMs]);
 
   const job = status?.job;
   const order = job?.$order;
@@ -569,7 +554,6 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
         consoleTime={consoleTime}
         loading={downtimeLoading}
         lineState={lineStateClass}
-        snapshots={snapshots}
       />
 
       <div className="flex flex-wrap items-center gap-3 mb-4 text-[11px] font-semibold">

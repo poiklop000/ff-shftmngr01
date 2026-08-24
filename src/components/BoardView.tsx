@@ -373,11 +373,11 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
 
   const order = job?.$order;
   const product = order?.$product;
-  const sku = isIdle ? '-' : (product?.SKU || order?.clientId || '-');
-  const target = isIdle ? 0 : (job?.quantity ?? 0);
   const ofsProductName = product?.description || order?.name || '';
   const ofsRatedSpeed = job?.metadata?.ratedSpeed ? parseInt(job.metadata.ratedSpeed, 10) : 0;
   const isIdle = lineStateClass === 'idle';
+  const sku = isIdle ? '-' : (product?.SKU || order?.clientId || '-');
+  const target = isIdle ? 0 : (job?.quantity ?? 0);
   const productName = isIdle ? 'No active job' : (override?.product_name?.trim() || ofsProductName || 'No active job');
   const ratedSpeed = override?.rated_speed ?? ofsRatedSpeed;
   const jobCounts = job?.counts ?? {};

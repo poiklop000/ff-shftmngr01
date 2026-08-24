@@ -170,12 +170,12 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
   const order = job?.$order;
   const product = order?.$product;
   const jobId = job?.id ?? null;
+  const lineStateClass = classifyLineState(status?.runstate);
+  const isIdle = lineStateClass === 'idle';
   const sku = isIdle ? '-' : (product?.SKU || order?.clientId || '-');
   const target = isIdle ? 0 : (job?.quantity ?? 0);
   const ofsProductName = product?.description || order?.name || '';
   const ofsRatedSpeed = job?.metadata?.ratedSpeed ? parseInt(job.metadata.ratedSpeed, 10) : 0;
-  const lineStateClass = classifyLineState(status?.runstate);
-  const isIdle = lineStateClass === 'idle';
   const productName = isIdle ? 'No active job' : (override?.product_name?.trim() || ofsProductName || 'No active job');
   const ratedSpeed = override?.rated_speed ?? ofsRatedSpeed;
   const jobCounts = job?.counts ?? {};

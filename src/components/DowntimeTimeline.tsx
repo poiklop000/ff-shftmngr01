@@ -154,7 +154,6 @@ export function DowntimeTimeline({
   loading,
   lineState,
   runStateStart,
-  runStateDuration,
 }: DowntimeTimelineProps) {
   const { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount, status, bgSegments } = useMemo(() => {
     const hours = getActiveHours(currentShift, customHours);
@@ -167,6 +166,7 @@ export function DowntimeTimeline({
         totalDowntimeMin: 0,
         eventCount: 0,
         status: 'unknown' as ShiftTimeStatus,
+        bgSegments: [] as Array<{ leftPct: number; widthPct: number; color: string; label: string }>,
       };
     }
 

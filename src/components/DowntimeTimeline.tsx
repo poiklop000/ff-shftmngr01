@@ -16,17 +16,17 @@ const RUNNING_COLOR = LINE_STATE_COLORS.running;
 const IDLE_COLOR = LINE_STATE_COLORS.idle;
 
 function classifySnapshotRunState(state: string | null | undefined): LineStateClass {
-  const s = (state ?? '').toLowerCase();
+  if (!state) return 'running';
+  const s = state.toLowerCase();
   if (s.includes('setup')) return 'setup';
   if (s.includes('unplanned')) return 'downtime';
   if (s.includes('planned')) return 'planned';
   if (s.includes('downtime') || s.includes('down')) return 'downtime';
   if (s.includes('slow')) return 'slow';
-  if (s.includes('running') || s.includes('producing') || s.includes('production')) return 'running';
-  if (s.includes('shift') || s.includes('job') || s.includes('idle') || s.includes('standby') || s.includes('wait')) return 'idle';
+  if (s.includes('run') || s.includes('producing') || s.includes('production')) return 'running';
+  if (s.includes('stop') || s.includes('finish') || s.includes('complete') || s.includes('held') || s.includes('hold') || s.includes('idle') || s.includes('standby') || s.includes('wait')) return 'idle';
   if (s.includes('cleaning') || s.includes('maintenance') || s.includes('break') || s.includes('lunch')) return 'idle';
-  if (s.includes('stop') || s.includes('finish') || s.includes('complete') || s.includes('held') || s.includes('hold')) return 'idle';
-  return 'idle';
+  return 'running';
 }
 
 function getTypeColor(type: string | null): string {

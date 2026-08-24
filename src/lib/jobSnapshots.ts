@@ -511,3 +511,48 @@ export async function fetchSnapshotsForShiftState(
     runState: r.run_state,
   }));
 }
+
+/**
+ * Returns the run_state of the most recent job_snapshot within the given
+ * shift window, or null if no snapshots exist.  Used by Live/Board to
+ * determine the actual line state at shift end for past ended shifts,
+ * since the live OFS runstate always reads "idle" for historical dates.
+ */
+export async function fetchLastSnapshotRunState(
+  date: string,
+  shift: Shift,
+  customHours: string[],
+): Promise<string | null> {
+  if (!date) return null;
+
+  const hours = getActiveHours(shift, customHours);
+  if (hours.length === 0) return null;
+
+  const shiftStartStr = hours[0]!.split(' - ')[0]!.trim();
+  const lastInterval = hours[hours.length - 1]!;
+  const shiftEndStr = lastInterval.split(' - ')[1]!.trim();
+  const isOvernight = parseInt(shiftStartStr.split(':')[0] ?? '0', 10) >= 12;
+
+  let endDate = date;
+  if (isOvernight) {
+    const d = new Date(`${date}T00:00:00`);
+    d.setDate(d.getDate() + 1);
+    endDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  const startIso = new Date(localDateTimeToEpoch(`${date}T${shiftStartStr}`)).toISOString();
+  const endIso = new Date(localDateTimeToEpoch(`${endDate}T${shiftEndStr}`)).toISOString();
+
+  const { data, error } = await withTimeout(
+    supabase
+      .from('job_snapshots')
+      .select('run_state')
+      .gte('capture_time', startIso)
+      .lt('capture_time', endIso)
+      .order('capture_time', { ascending: false })
+      .limit(1),
+    DB_TIMEOUT_MS,
+  );
+  if (error) return null;
+  return (data as Array<{ run_state: string | null }>)?.[0]?.run_state ?? null;
+}

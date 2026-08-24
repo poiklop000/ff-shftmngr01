@@ -24,6 +24,7 @@ import {
 } from '@/lib/ofs';
 import { loadJobOverride, type JobOverride } from '@/lib/jobOverrides';
 import { fetchDowntimeForShift, downtimeEventEndText, type DowntimeEvent } from '@/lib/downtime';
+import { fetchLastSnapshotRunState } from '@/lib/jobSnapshots';
 import {
   filterByShiftWindow,
   getActiveHours,
@@ -357,6 +358,45 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
   const runstate = status?.runstate;
   const lineStateClass = classifyLineState(runstate);
   const stateColor = LINE_STATE_COLORS[lineStateClass];
+
+  // For past ended shifts the live runstate always reads "idle".  Fetch the
+  // last snapshot's run_state to determine the actual line state at shift end.
+  const [lastSnapRunState, setLastSnapRunState] = useState<string | null>(null);
+  const shiftEnded = useMemo(() => {
+    if (!consoleTime || !date) return false;
+    const h = getActiveHours(shift, []);
+    if (h.length === 0) return false;
+    const endStr = h[h.length - 1]!.split(' - ')[1]!.trim();
+    const startStr = h[0]!.split(' - ')[0]!.trim();
+    const endMin = parseInt(endStr.split(':')[0] ?? '0', 10) * 60 + parseInt(endStr.split(':')[1] ?? '0', 10);
+    const startMin = parseInt(startStr.split(':')[0] ?? '0', 10) * 60 + parseInt(startStr.split(':')[1] ?? '0', 10);
+    const shiftEnd = endMin <= startMin ? endMin + 1440 : endMin;
+    const nowMatch = consoleTime.match(/(\d{1,2}):(\d{2})/);
+    if (!nowMatch) return false;
+    const nowMin = parseInt(nowMatch[1], 10) * 60 + parseInt(nowMatch[2], 10);
+    return nowMin > shiftEnd || consoleTime.slice(0, 10) !== date;
+  }, [consoleTime, date, shift]);
+
+  useEffect(() => {
+    if (!shiftEnded || !date) { setLastSnapRunState(null); return; }
+    let cancelled = false;
+    fetchLastSnapshotRunState(date, shift, [])
+      .then((rs) => { if (!cancelled) setLastSnapRunState(rs); })
+      .catch(() => { if (!cancelled) setLastSnapRunState(null); });
+    return () => { cancelled = true; };
+  }, [shiftEnded, date, shift]);
+
+  const effectiveLineState = useMemo(() => {
+    if (!shiftEnded) return lineStateClass;
+    if (lastSnapRunState === null) return lineStateClass;
+    const rs = lastSnapRunState.toLowerCase();
+    if (rs.includes('run') || rs.includes('producing') || rs.includes('production')) return 'running';
+    if (rs.includes('setup')) return 'setup';
+    if (rs.includes('slow')) return 'slow';
+    if (rs.includes('downtime') || rs.includes('down')) return 'downtime';
+    if (rs.includes('planned')) return 'planned';
+    return 'idle';
+  }, [shiftEnded, lineStateClass, lastSnapRunState]);
   const stateLabel = runstate?.description || runstate?.name || runstate?.state || 'Idle';
 
   // TEMP-PREVIEW: `?downtimePopup=1` forces the popup open regardless of line
@@ -684,7 +724,7 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
                 date={date}
                 consoleTime={consoleTime}
                 loading={boardLoading}
-                lineState={lineStateClass}
+                lineState={effectiveLineState}
               />
             </div>
           </div>

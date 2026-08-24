@@ -204,28 +204,7 @@ export function DowntimeTimeline({
 
     const effectiveEndPct = nowPct !== null ? nowPct : (status === 'ended' ? 100 : null);
     const runWidthPct = status === 'not-started' ? 0 : effectiveEndPct ?? 100;
-
-    // For today's in-progress shift, use the live lineState from OFS.
-    // For past ended shifts, infer from downtime events: if the last event
-    // is unresolved (no end time), the line was idle at shift end; otherwise
-    // it was running.  This avoids showing a false grey bar for the entire
-    // past shift when the live runstate always reads "idle".
-    let effectiveLineState = lineState;
-    if (status === 'ended' && effectiveLineState === 'idle') {
-      const shiftEvents = events.filter((e) => {
-        if (!e.start_text) return false;
-        const min = consoleTimeToShiftMinutes(e.start_text, date);
-        return min >= shiftStartMin && min <= shiftEndMin;
-      });
-      const lastEvent = shiftEvents.length > 0
-        ? shiftEvents.reduce((a, b) => (a.start_epoch > b.start_epoch ? a : b))
-        : null;
-      if (!lastEvent || lastEvent.resolved) {
-        effectiveLineState = 'running';
-      }
-    }
-
-    const runColor = effectiveLineState === 'idle' ? IDLE_COLOR : RUNNING_COLOR;
+    const runColor = lineState === 'idle' ? IDLE_COLOR : RUNNING_COLOR;
 
     return { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount: blocks.length, status };
   }, [events, currentShift, customHours, date, consoleTime, lineState]);

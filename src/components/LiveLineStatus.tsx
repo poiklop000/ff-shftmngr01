@@ -19,7 +19,7 @@ import { loadLiveIntervals } from '@/lib/liveConfig';
 import { fetchOfsStatus, classifyLineState, LINE_STATE_COLORS, type OfsLiveStatus, type OfsRunState, type LineStateClass } from '@/lib/ofs';
 import { loadJobOverride, saveJobOverride, deleteJobOverride, type JobOverride } from '@/lib/jobOverrides';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
-import { fetchHourlyRatedSpeeds } from '@/lib/jobSnapshots';
+import { fetchHourlyRatedSpeeds, fetchLastSnapshotRunState } from '@/lib/jobSnapshots';
 import { fetchDowntimeByDate, downtimeEventEndText, type DowntimeEvent } from '@/lib/downtime';
 import { filterByShiftWindow, getActiveHours, SHIFT_LABELS, type Shift } from '@/types';
 import { DowntimeTimeline } from '@/components/DowntimeTimeline';
@@ -171,7 +171,47 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
   const product = order?.$product;
   const jobId = job?.id ?? null;
   const lineStateClass = classifyLineState(status?.runstate);
-  const isIdle = lineStateClass === 'idle';
+
+  // For past ended shifts, the live runstate always reads "idle".  Fetch the
+  // last snapshot's run_state to determine the actual line state at shift end.
+  const [lastSnapRunState, setLastSnapRunState] = useState<string | null>(null);
+  const shiftEnded = consoleTime && date && (() => {
+    const h = getActiveHours(currentShift, customHours);
+    if (h.length === 0) return false;
+    const endStr = h[h.length - 1]!.split(' - ')[1]!.trim();
+    const startStr = h[0]!.split(' - ')[0]!.trim();
+    const endMin = parseInt(endStr.split(':')[0] ?? '0', 10) * 60 + parseInt(endStr.split(':')[1] ?? '0', 10);
+    const startMin = parseInt(startStr.split(':')[0] ?? '0', 10) * 60 + parseInt(startStr.split(':')[1] ?? '0', 10);
+    const shiftEnd = endMin <= startMin ? endMin + 1440 : endMin;
+    const nowMatch = consoleTime.match(/(\d{1,2}):(\d{2})/);
+    if (!nowMatch) return false;
+    const nowMin = parseInt(nowMatch[1], 10) * 60 + parseInt(nowMatch[2], 10);
+    return nowMin > shiftEnd || consoleTime.slice(0, 10) !== date;
+  })();
+
+  useEffect(() => {
+    if (!shiftEnded || !date) { setLastSnapRunState(null); return; }
+    let cancelled = false;
+    fetchLastSnapshotRunState(date, currentShift, customHours)
+      .then((rs) => { if (!cancelled) setLastSnapRunState(rs); })
+      .catch(() => { if (!cancelled) setLastSnapRunState(null); });
+    return () => { cancelled = true; };
+  }, [shiftEnded, date, currentShift, customHours]);
+
+  const effectiveLineState = useMemo(() => {
+    if (!shiftEnded) return lineStateClass;
+    if (lastSnapRunState === null && !lineStateClass) return 'unknown';
+    if (lastSnapRunState === null) return lineStateClass;
+    const rs = lastSnapRunState.toLowerCase();
+    if (rs.includes('run') || rs.includes('producing') || rs.includes('production')) return 'running';
+    if (rs.includes('setup')) return 'setup';
+    if (rs.includes('slow')) return 'slow';
+    if (rs.includes('downtime') || rs.includes('down')) return 'downtime';
+    if (rs.includes('planned')) return 'planned';
+    return 'idle';
+  }, [shiftEnded, lineStateClass, lastSnapRunState]);
+
+  const isIdle = effectiveLineState === 'idle';
   const sku = isIdle ? '-' : (product?.SKU || order?.clientId || '-');
   const target = isIdle ? 0 : (job?.quantity ?? 0);
   const ofsProductName = product?.description || order?.name || '';
@@ -553,7 +593,7 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
         date={date}
         consoleTime={consoleTime}
         loading={downtimeLoading}
-        lineState={lineStateClass}
+        lineState={effectiveLineState}
       />
 
       <div className="flex flex-wrap items-center gap-3 mb-4 text-[11px] font-semibold">

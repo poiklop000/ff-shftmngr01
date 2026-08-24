@@ -300,6 +300,8 @@ export function DowntimeTimeline({
             <p className="text-center text-[11px] text-slate-400 font-medium mt-2 m-0">
               {status === 'not-started'
                 ? "Shift hasn't started yet — no events to display."
+                : lineState === 'idle'
+                ? 'Line is idle — no active job.'
                 : 'No downtime events this shift — clean run.'}
             </p>
           )}

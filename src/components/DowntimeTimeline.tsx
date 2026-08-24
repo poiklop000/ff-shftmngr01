@@ -129,7 +129,7 @@ export function DowntimeTimeline({
   loading,
   lineState,
 }: DowntimeTimelineProps) {
-  const { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount, status } = useMemo(() => {
+  const { blocks, hourMarks, nowPct, bgSegments, totalDowntimeMin, eventCount, status } = useMemo(() => {
     const hours = getActiveHours(currentShift, customHours);
     if (hours.length === 0 || !date) {
       return {
@@ -204,9 +204,46 @@ export function DowntimeTimeline({
 
     const effectiveEndPct = nowPct !== null ? nowPct : (status === 'ended' ? 100 : null);
     const runWidthPct = status === 'not-started' ? 0 : effectiveEndPct ?? 100;
-    const runColor = lineState === 'idle' ? IDLE_COLOR : RUNNING_COLOR;
 
-    return { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount: blocks.length, status };
+    type BgSegment = { leftPct: number; widthPct: number; color: string };
+    let bgSegments: BgSegment[] = [];
+
+    if (status === 'ended' && events.length > 0) {
+      const sorted = [...events]
+        .filter((e) => e.start_text)
+        .map((e) => {
+          const s = consoleTimeToShiftMinutes(e.start_text!, date);
+          const end = e.resolved ? s + (e.duration_ms ?? 0) / 60000 : shiftEndMin;
+          return { startMin: s, endMin: end, resolved: e.resolved };
+        })
+        .filter((e) => e.endMin > shiftStartMin && e.startMin < shiftEndMin)
+        .sort((a, b) => b.startMin - a.startMin);
+
+      const last = sorted[0];
+      if (last && !last.resolved) {
+        const idleStartPct = Math.max(((last.startMin - shiftStartMin) / totalMin) * 100, 0);
+        bgSegments = [
+          { leftPct: 0, widthPct: idleStartPct, color: RUNNING_COLOR },
+          { leftPct: idleStartPct, widthPct: 100 - idleStartPct, color: IDLE_COLOR },
+        ];
+      } else if (last) {
+        const eventEndMin = Math.min(last.endMin, shiftEndMin);
+        const idleStartPct = ((eventEndMin - shiftStartMin) / totalMin) * 100;
+        bgSegments = [
+          { leftPct: 0, widthPct: idleStartPct, color: RUNNING_COLOR },
+          { leftPct: idleStartPct, widthPct: 100 - idleStartPct, color: IDLE_COLOR },
+        ];
+      } else {
+        bgSegments = [{ leftPct: 0, widthPct: 100, color: RUNNING_COLOR }];
+      }
+    } else if (status === 'ended') {
+      bgSegments = [{ leftPct: 0, widthPct: 100, color: RUNNING_COLOR }];
+    } else {
+      const color = lineState === 'idle' ? IDLE_COLOR : RUNNING_COLOR;
+      bgSegments = [{ leftPct: 0, widthPct: runWidthPct, color }];
+    }
+
+    return { blocks, hourMarks, nowPct, runWidthPct, bgSegments, totalDowntimeMin, eventCount: blocks.length, status };
   }, [events, currentShift, customHours, date, consoleTime, lineState]);
 
   return (
@@ -247,14 +284,18 @@ export function DowntimeTimeline({
           </div>
 
           <div className="relative h-9 rounded-md bg-slate-100 border border-slate-200 overflow-hidden">
-            <div
-              className="absolute top-0 bottom-0 rounded-l-md"
-              style={{
-                left: '0%',
-                width: `${runWidthPct}%`,
-                backgroundColor: runColor,
-              }}
-            />
+            {bgSegments.map((seg, i) => (
+              <div
+                key={`bg-${i}`}
+                className="absolute top-0 bottom-0"
+                style={{
+                  left: `${seg.leftPct}%`,
+                  width: `${seg.widthPct}%`,
+                  backgroundColor: seg.color,
+                  borderRadius: i === 0 ? '3px 0 0 3px' : i === bgSegments.length - 1 ? '0 3px 3px 0' : undefined,
+                }}
+              />
+            ))}
 
             {hourMarks.map((m, i) => (
               <div

@@ -442,3 +442,72 @@ export async function savePlateauThreshold(pct: number): Promise<void> {
     .upsert({ key: PLATEAU_THRESHOLD_KEY, value: String(safe) }, { onConflict: 'key' });
   if (error) throw new Error(error.message);
 }
+
+export interface SnapshotStateRow {
+  captureTime: string; // console-time "YYYY-MM-DD HH:MM" in Pacific/Auckland
+  runState: string | null;
+}
+
+/**
+ * Fetches capture_time + run_state from job_snapshots for the given shift
+ * window. Used by the timeline to build a multi-segment background that shows
+ * every state change (running / idle / setup / downtime / planned / slow)
+ * with the correct colour, rather than just a single green→grey transition.
+ *
+ * Returns snapshots sorted oldest-first. Pagination is handled for long
+ * (overnight) shifts that may exceed the 1000-row cap.
+ */
+export async function fetchSnapshotsForShiftState(
+  date: string,
+  shift: Shift,
+  customHours: string[],
+): Promise<SnapshotStateRow[]> {
+  if (!date) return [];
+
+  const hours = getActiveHours(shift, customHours);
+  if (hours.length === 0) return [];
+
+  const shiftStartStr = hours[0]!.split(' - ')[0]!.trim();
+  const lastInterval = hours[hours.length - 1]!;
+  const shiftEndStr = lastInterval.split(' - ')[1]!.trim();
+  const isOvernight = parseInt(shiftStartStr.split(':')[0] ?? '0', 10) >= 12;
+
+  let endDate = date;
+  if (isOvernight) {
+    const d = new Date(`${date}T00:00:00`);
+    d.setDate(d.getDate() + 1);
+    endDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  const startIso = new Date(localDateTimeToEpoch(`${date}T${shiftStartStr}`)).toISOString();
+  const endIso = new Date(localDateTimeToEpoch(`${endDate}T${shiftEndStr}`)).toISOString();
+
+  interface RawRow {
+    capture_time: string;
+    run_state: string | null;
+  }
+
+  const all: RawRow[] = [];
+  const PAGE = 1000;
+  for (let offset = 0; offset < 100000; offset += PAGE) {
+    const { data, error } = await withTimeout(
+      supabase
+        .from('job_snapshots')
+        .select('capture_time, run_state')
+        .gte('capture_time', startIso)
+        .lt('capture_time', endIso)
+        .order('capture_time', { ascending: true })
+        .range(offset, offset + PAGE - 1),
+      DB_TIMEOUT_MS,
+    );
+    if (error) throw new Error(error.message);
+    const page = (data as RawRow[]) ?? [];
+    all.push(...page);
+    if (page.length < PAGE) break;
+  }
+
+  return all.map((r) => ({
+    captureTime: utcIsoToConsoleTime(r.capture_time),
+    runState: r.run_state,
+  }));
+}

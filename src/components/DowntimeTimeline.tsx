@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import { Activity, Loader2 } from 'lucide-react';
 import { consoleTimeToShiftMinutes, getActiveHours, type Shift } from '@/types';
 import type { DowntimeEvent } from '@/lib/downtime';
+import { LINE_STATE_COLORS, type LineStateClass } from '@/lib/ofs';
+import type { SnapshotStateRow } from '@/lib/jobSnapshots';
 
 const TYPE_COLORS: Record<string, string> = {
   UNPLANNED: '#dc2626',
@@ -10,8 +12,22 @@ const TYPE_COLORS: Record<string, string> = {
   RUNNING_SLOW: '#9acd32',
 };
 
-const RUNNING_COLOR = '#16a34a';
-const IDLE_COLOR = '#94a3b8';
+const RUNNING_COLOR = LINE_STATE_COLORS.running;
+const IDLE_COLOR = LINE_STATE_COLORS.idle;
+
+function classifySnapshotRunState(state: string | null | undefined): LineStateClass {
+  const s = (state ?? '').toLowerCase();
+  if (s.includes('setup')) return 'setup';
+  if (s.includes('unplanned')) return 'downtime';
+  if (s.includes('planned')) return 'planned';
+  if (s.includes('downtime') || s.includes('down')) return 'downtime';
+  if (s.includes('slow')) return 'slow';
+  if (s.includes('running') || s.includes('producing') || s.includes('production')) return 'running';
+  if (s.includes('shift') || s.includes('job') || s.includes('idle') || s.includes('standby') || s.includes('wait')) return 'idle';
+  if (s.includes('cleaning') || s.includes('maintenance') || s.includes('break') || s.includes('lunch')) return 'idle';
+  if (s.includes('stop') || s.includes('finish') || s.includes('complete') || s.includes('held') || s.includes('hold')) return 'idle';
+  return 'idle';
+}
 
 function getTypeColor(type: string | null): string {
   if (!type) return '#94a3b8';
@@ -21,22 +37,6 @@ function getTypeColor(type: string | null): string {
 function timeStrToMinutes(time: string): number {
   const [h, m] = time.split(':').map(Number);
   return (h ?? 0) * 60 + (m ?? 0);
-}
-
-function formatEpoch(epochMs: number): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Pacific/Auckland',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).formatToParts(new Date(epochMs));
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00';
-  const hour = get('hour') === '24' ? '00' : get('hour');
-  return `${get('year')}-${get('month')}-${get('day')} ${hour}:${get('minute')}:${get('second')}`;
 }
 
 function formatHour(min: number): string {
@@ -142,7 +142,7 @@ interface DowntimeTimelineProps {
   consoleTime: string;
   loading?: boolean;
   lineState?: string;
-  runStateStart?: number;
+  snapshots?: SnapshotStateRow[];
 }
 
 export function DowntimeTimeline({
@@ -153,7 +153,7 @@ export function DowntimeTimeline({
   consoleTime,
   loading,
   lineState,
-  runStateStart,
+  snapshots,
 }: DowntimeTimelineProps) {
   const { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount, status, bgSegments } = useMemo(() => {
     const hours = getActiveHours(currentShift, customHours);
@@ -236,55 +236,65 @@ export function DowntimeTimeline({
     const runWidthPct = status === 'not-started' ? 0 : effectiveEndPct ?? 100;
     const runColor = lineState === 'idle' ? IDLE_COLOR : RUNNING_COLOR;
 
-    // Build background segments.  Before the current runstate started, the
-    // line was producing (green).  From runstate.start to now, the colour
-    // depends on whether the line is currently running (green) or idle (grey).
-    // Uses consoleTimeToShiftMinutes (day-diff aware) instead of computeNowPct
-    // which rejects date mismatches.  Falls back to last event start for past
-    // ended shifts where the live runstate belongs to a different date.
+    // Build multi-segment background from job_snapshots (minute-resolution
+    // run_state data).  Each consecutive run of the same classified state
+    // becomes one coloured segment — giving a full history of state changes
+    // (running, idle, setup, downtime, planned, slow) rather than just a
+    // single green→grey transition.
     const bgSegments: Array<{ leftPct: number; widthPct: number; color: string; label: string }> = [];
-    if (status !== 'not-started' && effectiveEndPct !== null) {
-      let stateStartPct: number | null = null;
-
-      // 1) Try runstate-based transition (works for current / overnight shifts)
-      if (runStateStart && runStateStart > 0) {
-        const runstateMin = consoleTimeToShiftMinutes(formatEpoch(runStateStart), date);
-        const pct = ((runstateMin - shiftStartMin) / totalMin) * 100;
-        if (pct > 0 && pct < effectiveEndPct) {
-          stateStartPct = pct;
-        }
+    if (status !== 'not-started' && effectiveEndPct !== null && snapshots && snapshots.length > 0) {
+      // Map each snapshot to its shift-minute position and classified state
+      const classified: Array<{ shiftMin: number; state: LineStateClass }> = [];
+      for (const snap of snapshots) {
+        if (!snap.captureTime) continue;
+        const min = consoleTimeToShiftMinutes(snap.captureTime, date);
+        if (min < shiftStartMin || min > shiftEndMin) continue;
+        classified.push({ shiftMin: min, state: classifySnapshotRunState(snap.runState) });
       }
 
-      // 2) Fallback for past ended shifts: derive idle start from the last
-      //    event that falls within the shift window.
-      if (stateStartPct === null && lineState === 'idle' && events.length > 0) {
-        let latestEvtStart: number | null = null;
-        for (const evt of events) {
-          if (!evt.start_text) continue;
-          const startMin = consoleTimeToShiftMinutes(evt.start_text, date);
-          if (startMin >= shiftStartMin && startMin <= shiftEndMin) {
-            if (latestEvtStart === null || startMin > latestEvtStart) {
-              latestEvtStart = startMin;
-            }
+      if (classified.length > 0) {
+        // Merge consecutive snapshots with the same state into segments
+        const segments: Array<{ startMin: number; endMin: number; state: LineStateClass }> = [];
+        let cur = classified[0]!;
+        let segStart = cur.shiftMin;
+        let segState = cur.state;
+
+        for (let i = 1; i < classified.length; i++) {
+          const next = classified[i]!;
+          if (next.state !== segState) {
+            segments.push({ startMin: segStart, endMin: next.shiftMin, state: segState });
+            segStart = next.shiftMin;
+            segState = next.state;
           }
         }
-        if (latestEvtStart !== null) {
-          stateStartPct = ((latestEvtStart - shiftStartMin) / totalMin) * 100;
-        }
-      }
+        segments.push({ startMin: segStart, endMin: classified[classified.length - 1]!.shiftMin, state: segState });
 
-      if (stateStartPct !== null && stateStartPct > 0) {
-        bgSegments.push({ leftPct: 0, widthPct: stateStartPct, color: RUNNING_COLOR, label: 'Producing' });
-        const currentColor = lineState === 'idle' ? IDLE_COLOR : RUNNING_COLOR;
-        const currentLabel = lineState === 'idle' ? 'Idle' : 'Producing';
-        bgSegments.push({ leftPct: stateStartPct, widthPct: effectiveEndPct - stateStartPct, color: currentColor, label: currentLabel });
-      } else if (lineState !== 'idle') {
-        bgSegments.push({ leftPct: 0, widthPct: effectiveEndPct, color: RUNNING_COLOR, label: 'Producing' });
+        // Extend the first segment back to shift start and the last to effectiveEnd
+        const effectiveEndMin = shiftStartMin + (effectiveEndPct / 100) * totalMin;
+
+        for (const seg of segments) {
+          const leftMin = seg === segments[0] ? shiftStartMin : seg.startMin;
+          const rightMin = seg === segments[segments.length - 1] ? effectiveEndMin : seg.endMin;
+          const leftPct = ((leftMin - shiftStartMin) / totalMin) * 100;
+          const widthPct = Math.max(((rightMin - leftMin) / totalMin) * 100, 0);
+          if (widthPct <= 0) continue;
+          bgSegments.push({
+            leftPct,
+            widthPct,
+            color: LINE_STATE_COLORS[seg.state],
+            label: seg.state.charAt(0).toUpperCase() + seg.state.slice(1),
+          });
+        }
       }
     }
 
+    // Fallback: no snapshot data — use the old single-transition heuristic
+    if (bgSegments.length === 0 && status !== 'not-started' && effectiveEndPct !== null) {
+      bgSegments.push({ leftPct: 0, widthPct: effectiveEndPct, color: runColor, label: lineState === 'idle' ? 'Idle' : 'Producing' });
+    }
+
     return { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount: blocks.length, status, bgSegments };
-  }, [events, currentShift, customHours, date, consoleTime, lineState, runStateStart]);
+  }, [events, currentShift, customHours, date, consoleTime, lineState, snapshots]);
 
   return (
     <div className="card rounded-lg p-4 mb-4 border border-slate-200 bg-white">

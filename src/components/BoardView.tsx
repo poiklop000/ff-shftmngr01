@@ -24,6 +24,7 @@ import {
 } from '@/lib/ofs';
 import { loadJobOverride, type JobOverride } from '@/lib/jobOverrides';
 import { fetchDowntimeForShift, downtimeEventEndText, type DowntimeEvent } from '@/lib/downtime';
+import { fetchSnapshotsForShiftState, type SnapshotStateRow } from '@/lib/jobSnapshots';
 import {
   filterByShiftWindow,
   getActiveHours,
@@ -181,6 +182,7 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
   const [summaryRefreshMs, setSummaryRefreshMs] = useState(DEFAULT_SUMMARY_MS);
   const [downtimeEvents, setDowntimeEvents] = useState<DowntimeEvent[]>([]);
   const [boardLoading, setBoardLoading] = useState(false);
+  const [snapshots, setSnapshots] = useState<SnapshotStateRow[]>([]);
   const [override, setOverride] = useState<JobOverride | null>(null);
   const [now, setNow] = useState(Date.now());
   const [mainView, setMainView] = useState<BoardMainView>('status');
@@ -259,6 +261,20 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
       if (timer) window.clearInterval(timer);
     };
   }, [shift, date, summaryRefreshMs]);
+
+  useEffect(() => {
+    if (!date) return;
+    let cancelled = false;
+    fetchSnapshotsForShiftState(date, shift, [])
+      .then((rows) => { if (!cancelled) setSnapshots(rows); })
+      .catch(() => { if (!cancelled) setSnapshots([]); });
+    const timer = window.setInterval(() => {
+      fetchSnapshotsForShiftState(date, shift, [])
+        .then((rows) => { if (!cancelled) setSnapshots(rows); })
+        .catch(() => {});
+    }, summaryRefreshMs);
+    return () => { cancelled = true; if (timer) window.clearInterval(timer); };
+  }, [date, shift, summaryRefreshMs]);
 
   const job = status?.job;
   const jobId = job?.id ?? null;
@@ -685,8 +701,7 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
                 consoleTime={consoleTime}
                 loading={boardLoading}
                 lineState={lineStateClass}
-                runStateStart={runstate?.start}
-                runStateDuration={runstate?.duration}
+                snapshots={snapshots}
               />
             </div>
           </div>

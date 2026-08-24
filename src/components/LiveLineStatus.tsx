@@ -394,7 +394,7 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
         <StatusCard
           icon={<Gauge size={18} />}
           label="Line State"
-          value={runstate?.description || runstate?.name || '-'}
+          value={lineStateClass === 'idle' ? 'Idle' : (runstate?.description || runstate?.name || '-')}
           accent={lineStateClass}
           badge={<span className="inline-block w-2.5 h-2.5 rounded-full animate-pulse" style={{ backgroundColor: stateColor }} />}
         />
@@ -520,11 +520,12 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <Field label="Product" value={productName} />
             <Field label="SKU" value={sku} />
-            <Field label="Target Quantity" value={target.toLocaleString()} />
-            <Field label="Rated Speed" value={ratedSpeed > 0 ? `${ratedSpeed.toLocaleString()} /hr` : '-'} />
+            {!isIdle && <Field label="Target Quantity" value={target.toLocaleString()} />}
+            {!isIdle && <Field label="Rated Speed" value={ratedSpeed > 0 ? `${ratedSpeed.toLocaleString()} /hr` : '-'} />}
           </div>
         )}
 
+        {!isIdle && (
         <div className="mt-4">
           <div className="flex justify-between items-center mb-1.5 text-[12px] font-semibold text-blue-900">
             <span>Production Progress</span>
@@ -545,6 +546,7 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
             )}
           </div>
         </div>
+        )}
       </div>
 
       <DowntimeTimeline

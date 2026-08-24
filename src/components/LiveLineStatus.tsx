@@ -166,10 +166,6 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
     return () => clearInterval(id);
   }, [loadDowntime, date, summaryRefreshMs]);
 
-  const job = status?.job;
-  const order = job?.$order;
-  const product = order?.$product;
-  const jobId = job?.id ?? null;
   const lineStateClass = classifyLineState(status?.runstate);
 
   const job = status?.job;

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Activity, Loader2 } from 'lucide-react';
 import { consoleTimeToShiftMinutes, getActiveHours, type Shift } from '@/types';
 import type { DowntimeEvent } from '@/lib/downtime';
+import type { OfsSpanItem } from '@/lib/ofs';
 
 const TYPE_COLORS: Record<string, string> = {
   UNPLANNED: '#dc2626',
@@ -126,6 +127,7 @@ interface DowntimeTimelineProps {
   consoleTime: string;
   loading?: boolean;
   lineState?: string;
+  spanItems?: OfsSpanItem[];
 }
 
 export function DowntimeTimeline({
@@ -136,8 +138,9 @@ export function DowntimeTimeline({
   consoleTime,
   loading,
   lineState,
+  spanItems,
 }: DowntimeTimelineProps) {
-  const { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount, status } = useMemo(() => {
+  const { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount, status, bgSegments } = useMemo(() => {
     const hours = getActiveHours(currentShift, customHours);
     if (hours.length === 0 || !date) {
       return {
@@ -214,8 +217,47 @@ export function DowntimeTimeline({
     const runWidthPct = status === 'not-started' ? 0 : nowPct !== null ? nowPct : 100;
     const runColor = lineState === 'idle' ? IDLE_COLOR : RUNNING_COLOR;
 
-    return { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount: blocks.length, status };
-  }, [events, currentShift, customHours, date, consoleTime, lineState]);
+    // Build background segments from OFS live/spans items.  Each span that
+    // falls within the shift window becomes a coloured segment (green for
+    // running, grey for idle/other).  When no spanItems are provided we fall
+    // back to the single solid bar (runWidthPct / runColor).
+    const bgSegments: Array<{ leftPct: number; widthPct: number; color: string; label: string }> = [];
+    if (spanItems && spanItems.length > 0 && status !== 'not-started') {
+      for (const sp of spanItems) {
+        if (!sp.start || !sp.duration) continue;
+        if (!sp.startText) continue;
+        const spStartMin = consoleTimeToShiftMinutes(sp.startText, date);
+        const spEndMin = spStartMin + sp.duration / 60000;
+        if (spEndMin <= shiftStartMin || spStartMin >= shiftEndMin) continue;
+        const clampedS = Math.max(spStartMin, shiftStartMin);
+        const clampedE = Math.min(spEndMin, shiftEndMin);
+        const durMin = clampedE - clampedS;
+        if (durMin <= 0) continue;
+
+        const leftPct = ((clampedS - shiftStartMin) / totalMin) * 100;
+        const widthPct = (durMin / totalMin) * 100;
+        const st = (sp.state ?? '').toLowerCase();
+        const isRunning = st.includes('running') && !st.includes('slow');
+        const color = isRunning ? RUNNING_COLOR : IDLE_COLOR;
+        bgSegments.push({ leftPct, widthPct: Math.max(widthPct, 0.1), color, label: sp.state ?? '' });
+      }
+      // Merge adjacent segments of the same colour
+      bgSegments.sort((a, b) => a.leftPct - b.leftPct);
+      const merged: typeof bgSegments = [];
+      for (const seg of bgSegments) {
+        const last = merged[merged.length - 1];
+        if (last && last.color === seg.color && Math.abs((last.leftPct + last.widthPct) - seg.leftPct) < 0.15) {
+          last.widthPct = seg.leftPct + seg.widthPct - last.leftPct;
+        } else {
+          merged.push({ ...seg });
+        }
+      }
+      bgSegments.length = 0;
+      bgSegments.push(...merged);
+    }
+
+    return { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount: blocks.length, status, bgSegments };
+  }, [events, currentShift, customHours, date, consoleTime, lineState, spanItems]);
 
   return (
     <div className="card rounded-lg p-4 mb-4 border border-slate-200 bg-white">
@@ -255,14 +297,28 @@ export function DowntimeTimeline({
           </div>
 
           <div className="relative h-9 rounded-md bg-slate-100 border border-slate-200 overflow-hidden">
-            <div
-              className="absolute top-0 bottom-0 rounded-l-md"
-              style={{
-                left: '0%',
-                width: `${runWidthPct}%`,
-                backgroundColor: runColor,
-              }}
-            />
+            {bgSegments.length > 0 ? (
+              bgSegments.map((seg, i) => (
+                <div
+                  key={`bg-${i}`}
+                  className="absolute top-0 bottom-0"
+                  style={{
+                    left: `${seg.leftPct}%`,
+                    width: `${seg.widthPct}%`,
+                    backgroundColor: seg.color,
+                  }}
+                />
+              ))
+            ) : (
+              <div
+                className="absolute top-0 bottom-0 rounded-l-md"
+                style={{
+                  left: '0%',
+                  width: `${runWidthPct}%`,
+                  backgroundColor: runColor,
+                }}
+              />
+            )}
 
             {hourMarks.map((m, i) => (
               <div

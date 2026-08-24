@@ -114,12 +114,7 @@ export async function fetchJobsForShift(
     if (name) overrides.set(o.job_id, name);
   }
 
-  // Older snapshots may predate the run_state column; in that case fall back to
-  // showing every distinct job rather than dropping them all.
-  const anyRunState = rows.some((r) => !!r.run_state);
-
   const isActive = (jobRows: JobSnapshot[]): boolean => {
-    if (!anyRunState) return true;
     // The job was running at some point during the shift...
     if (jobRows.some((r) => isRunningState(r.run_state))) return true;
     // ...or its produced total increased between snapshots, i.e. the line was
@@ -129,6 +124,9 @@ export async function fetchJobsForShift(
     for (let i = 1; i < jobRows.length; i++) {
       if (toNum(jobRows[i].produced) > toNum(jobRows[i - 1].produced)) return true;
     }
+    // A single-snapshot job with no run_state is treated as active since we
+    // cannot determine from one data point whether it was producing.
+    if (jobRows.length <= 1) return true;
     return false;
   };
 

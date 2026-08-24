@@ -11,6 +11,7 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 const RUNNING_COLOR = '#16a34a';
+const IDLE_COLOR = '#94a3b8';
 
 function getTypeColor(type: string | null): string {
   if (!type) return '#94a3b8';
@@ -124,6 +125,7 @@ interface DowntimeTimelineProps {
   date: string;
   consoleTime: string;
   loading?: boolean;
+  lineState?: string;
 }
 
 export function DowntimeTimeline({
@@ -133,8 +135,9 @@ export function DowntimeTimeline({
   date,
   consoleTime,
   loading,
+  lineState,
 }: DowntimeTimelineProps) {
-  const { blocks, hourMarks, nowPct, runWidthPct, totalDowntimeMin, eventCount, status } = useMemo(() => {
+  const { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount, status } = useMemo(() => {
     const hours = getActiveHours(currentShift, customHours);
     if (hours.length === 0 || !date) {
       return {
@@ -209,9 +212,10 @@ export function DowntimeTimeline({
     }
 
     const runWidthPct = status === 'not-started' ? 0 : nowPct !== null ? nowPct : 100;
+    const runColor = lineState === 'idle' ? IDLE_COLOR : RUNNING_COLOR;
 
-    return { blocks, hourMarks, nowPct, runWidthPct, totalDowntimeMin, eventCount: blocks.length, status };
-  }, [events, currentShift, customHours, date, consoleTime]);
+    return { blocks, hourMarks, nowPct, runWidthPct, runColor, totalDowntimeMin, eventCount: blocks.length, status };
+  }, [events, currentShift, customHours, date, consoleTime, lineState]);
 
   return (
     <div className="card rounded-lg p-4 mb-4 border border-slate-200 bg-white">
@@ -256,7 +260,7 @@ export function DowntimeTimeline({
               style={{
                 left: '0%',
                 width: `${runWidthPct}%`,
-                backgroundColor: RUNNING_COLOR,
+                backgroundColor: runColor,
               }}
             />
 

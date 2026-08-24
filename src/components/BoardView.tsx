@@ -684,6 +684,7 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
                 date={date}
                 consoleTime={consoleTime}
                 loading={boardLoading}
+                lineState={lineStateClass}
               />
             </div>
           </div>

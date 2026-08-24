@@ -553,6 +553,7 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
         date={date}
         consoleTime={consoleTime}
         loading={downtimeLoading}
+        lineState={lineStateClass}
       />
 
       <div className="flex flex-wrap items-center gap-3 mb-4 text-[11px] font-semibold">

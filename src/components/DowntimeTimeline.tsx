@@ -230,23 +230,56 @@ export function DowntimeTimeline({
       });
     }
 
-    const runWidthPct = status === 'not-started' ? 0 : nowPct !== null ? nowPct : 100;
+    // For ended shifts the current time is past the window so nowPct is null;
+    // use 100 % so the bar still covers the full shift.
+    const effectiveEndPct = nowPct !== null ? nowPct : (status === 'ended' ? 100 : null);
+    const runWidthPct = status === 'not-started' ? 0 : effectiveEndPct ?? 100;
     const runColor = lineState === 'idle' ? IDLE_COLOR : RUNNING_COLOR;
 
     // Build background segments.  Before the current runstate started, the
     // line was producing (green).  From runstate.start to now, the colour
     // depends on whether the line is currently running (green) or idle (grey).
-    // This matches what OFS shows: green for production, grey only for idle.
+    // Uses consoleTimeToShiftMinutes (day-diff aware) instead of computeNowPct
+    // which rejects date mismatches.  Falls back to last event start for past
+    // ended shifts where the live runstate belongs to a different date.
     const bgSegments: Array<{ leftPct: number; widthPct: number; color: string; label: string }> = [];
-    if (status !== 'not-started' && runStateStart && runStateStart > 0 && nowPct !== null) {
-      const stateStartPct = computeNowPct(formatEpoch(runStateStart), date, shiftStartMin, shiftEndMin, totalMin);
+    if (status !== 'not-started' && effectiveEndPct !== null) {
+      let stateStartPct: number | null = null;
+
+      // 1) Try runstate-based transition (works for current / overnight shifts)
+      if (runStateStart && runStateStart > 0) {
+        const runstateMin = consoleTimeToShiftMinutes(formatEpoch(runStateStart), date);
+        const pct = ((runstateMin - shiftStartMin) / totalMin) * 100;
+        if (pct > 0 && pct < effectiveEndPct) {
+          stateStartPct = pct;
+        }
+      }
+
+      // 2) Fallback for past ended shifts: derive idle start from the last
+      //    event that falls within the shift window.
+      if (stateStartPct === null && lineState === 'idle' && events.length > 0) {
+        let latestEvtStart: number | null = null;
+        for (const evt of events) {
+          if (!evt.start_text) continue;
+          const startMin = consoleTimeToShiftMinutes(evt.start_text, date);
+          if (startMin >= shiftStartMin && startMin <= shiftEndMin) {
+            if (latestEvtStart === null || startMin > latestEvtStart) {
+              latestEvtStart = startMin;
+            }
+          }
+        }
+        if (latestEvtStart !== null) {
+          stateStartPct = ((latestEvtStart - shiftStartMin) / totalMin) * 100;
+        }
+      }
+
       if (stateStartPct !== null && stateStartPct > 0) {
-        // Before the current state began: green (was producing)
         bgSegments.push({ leftPct: 0, widthPct: stateStartPct, color: RUNNING_COLOR, label: 'Producing' });
-        // Current state period: green if running, grey if idle
         const currentColor = lineState === 'idle' ? IDLE_COLOR : RUNNING_COLOR;
         const currentLabel = lineState === 'idle' ? 'Idle' : 'Producing';
-        bgSegments.push({ leftPct: stateStartPct, widthPct: nowPct - stateStartPct, color: currentColor, label: currentLabel });
+        bgSegments.push({ leftPct: stateStartPct, widthPct: effectiveEndPct - stateStartPct, color: currentColor, label: currentLabel });
+      } else if (lineState !== 'idle') {
+        bgSegments.push({ leftPct: 0, widthPct: effectiveEndPct, color: RUNNING_COLOR, label: 'Producing' });
       }
     }
 

@@ -170,8 +170,8 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
   const order = job?.$order;
   const product = order?.$product;
   const jobId = job?.id ?? null;
-  const sku = product?.SKU || order?.clientId || '-';
-  const target = job?.quantity ?? 0;
+  const sku = isIdle ? '-' : (product?.SKU || order?.clientId || '-');
+  const target = isIdle ? 0 : (job?.quantity ?? 0);
   const ofsProductName = product?.description || order?.name || '';
   const ofsRatedSpeed = job?.metadata?.ratedSpeed ? parseInt(job.metadata.ratedSpeed, 10) : 0;
   const lineStateClass = classifyLineState(status?.runstate);

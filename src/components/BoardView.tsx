@@ -373,8 +373,8 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
 
   const order = job?.$order;
   const product = order?.$product;
-  const sku = product?.SKU || order?.clientId || '-';
-  const target = job?.quantity ?? 0;
+  const sku = isIdle ? '-' : (product?.SKU || order?.clientId || '-');
+  const target = isIdle ? 0 : (job?.quantity ?? 0);
   const ofsProductName = product?.description || order?.name || '';
   const ofsRatedSpeed = job?.metadata?.ratedSpeed ? parseInt(job.metadata.ratedSpeed, 10) : 0;
   const isIdle = lineStateClass === 'idle';
@@ -630,14 +630,14 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
                 <Field label="Product" value={productName} />
                 <Field label="SKU" value={sku} />
-                <Field label="Target Quantity" value={target.toLocaleString()} />
+                <Field label="Target Quantity" value={isIdle ? '—' : target.toLocaleString()} />
                 <Field label="Rated Speed" value={ratedSpeed > 0 ? `${ratedSpeed.toLocaleString()} /hr` : '-'} />
               </div>
               <div className="mt-4 flex-1 min-h-0 flex flex-col justify-center">
                 <div className="flex justify-between items-center mb-2 text-lg font-semibold text-blue-900">
                   <span>Production Progress</span>
                   <span className="tabular-nums">
-                    {produced.toLocaleString()} / {target.toLocaleString()} ({progress.toFixed(1)}%)
+                    {isIdle ? '— / —' : `${produced.toLocaleString()} / ${target.toLocaleString()} (${progress.toFixed(1)}%)`}
                   </span>
                 </div>
                 <div className="w-full h-5 rounded-full bg-blue-100 overflow-hidden">
@@ -647,7 +647,7 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
                   />
                 </div>
                 <div className="flex justify-between mt-2.5 text-lg text-blue-700 font-medium">
-                  <span>Remaining: {remaining.toLocaleString()}</span>
+                  <span>Remaining: {isIdle ? '—' : remaining.toLocaleString()}</span>
                   {remaining > 0 && (currentRate > 0 || ratedSpeed > 0) && (
                     <span>Est. finish: {estFinish}</span>
                   )}

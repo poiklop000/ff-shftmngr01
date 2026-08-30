@@ -193,6 +193,7 @@ export async function fetchHourlyRatedSpeeds(
     run_state: string | null;
     job_id: number | null;
     rated_speed: number | null;
+    produced: number | null;
   }
 
   // Snapshots are captured up to once a minute, so page past the 1000-row cap
@@ -203,7 +204,7 @@ export async function fetchHourlyRatedSpeeds(
     const { data, error } = await withTimeout(
       supabase
         .from('job_snapshots')
-        .select('capture_time, run_state, job_id, rated_speed')
+        .select('capture_time, run_state, job_id, rated_speed, produced')
         .gte('capture_time', startIso)
         .lt('capture_time', endIso)
         .order('capture_time', { ascending: true })
@@ -237,7 +238,6 @@ export async function fetchHourlyRatedSpeeds(
     }
   }
 
-  const anyRunState = all.some((r) => !!r.run_state);
   const shiftStartMin = timeStrToMinutes(shiftStartStr);
   const shiftEndMin = shiftTimeToMinutes(shiftEndStr, shiftStartMin);
 
@@ -251,12 +251,19 @@ export async function fetchHourlyRatedSpeeds(
     };
   });
 
+  // A snapshot only proves the line produced that minute if `produced`
+  // increased against the previous snapshot (the OFS console keeps reporting
+  // the last job's rated speed while idle/stopped). Track the deltas so idle
+  // hours never get a rated speed just because the job lingered on the console.
+  const producingBuckets = new Set<number>();
   const buckets = new Map<number, Array<{ job_id: number | null; rated_speed: number }>>();
+  let prevProduced: number | null = null;
   for (const row of all) {
+    const produced = row.produced;
+    const producedInc = prevProduced != null && produced != null && produced > prevProduced;
+    prevProduced = produced;
+
     if (row.rated_speed == null || row.rated_speed <= 0) continue;
-    // Only fill hours the line was actually running. If the snapshots predate
-    // the run_state column, accept any non-null rated speed instead.
-    if (anyRunState && !isRunningState(row.run_state)) continue;
 
     const consoleTime = utcIsoToConsoleTime(row.capture_time);
     const min = consoleTimeToShiftMinutes(consoleTime, date);
@@ -264,6 +271,9 @@ export async function fetchHourlyRatedSpeeds(
 
     const idx = intervals.findIndex((iv) => min >= iv.startMin && min < iv.endMin);
     if (idx < 0) continue;
+
+    if (producedInc || isRunningState(row.run_state)) producingBuckets.add(idx);
+
     const list = buckets.get(idx) ?? [];
     list.push({ job_id: row.job_id, rated_speed: row.rated_speed });
     buckets.set(idx, list);
@@ -271,7 +281,7 @@ export async function fetchHourlyRatedSpeeds(
 
   const result: Record<number, number> = {};
   for (const [idx, entries] of buckets) {
-    // The job with the most snapshots in this hour is the one that ran it.
+    if (!producingBuckets.has(idx)) continue; // line was idle that hour
     const jobCounts = new Map<number | null, number>();
     for (const e of entries) jobCounts.set(e.job_id, (jobCounts.get(e.job_id) ?? 0) + 1);
     let bestJob: number | null = null;

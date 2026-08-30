@@ -584,7 +584,7 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
                 icon={<TrendingUp size={22} />}
                 label="Current Rate"
                 value={`${Math.round(currentRate * 3600).toLocaleString()} /hr`}
-                hint={ratedSpeed > 0 ? `Rated: ${ratedSpeed.toLocaleString()} /hr` : undefined}
+                hint={!isIdle && ratedSpeed > 0 ? `Rated: ${ratedSpeed.toLocaleString()} /hr` : undefined}
                 accent="blue"
               />
               <StatusTile
@@ -631,7 +631,7 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
                 <Field label="Product" value={productName} />
                 <Field label="SKU" value={sku} />
                 <Field label="Target Quantity" value={isIdle ? '—' : target.toLocaleString()} />
-                <Field label="Rated Speed" value={ratedSpeed > 0 ? `${ratedSpeed.toLocaleString()} /hr` : '-'} />
+                <Field label="Rated Speed" value={isIdle ? '—' : ratedSpeed > 0 ? `${ratedSpeed.toLocaleString()} /hr` : '-'} />
               </div>
               <div className="mt-4 flex-1 min-h-0 flex flex-col justify-center">
                 <div className="flex justify-between items-center mb-2 text-lg font-semibold text-blue-900">

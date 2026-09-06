@@ -10,6 +10,11 @@
 //      within a rolling 1-hour window. Re-fires at escalating thresholds
 //      (5, 7, 9, 11, ...). Tracked via the recurring_issue_alerts table.
 //
+// When an UNPLANNED event escalates or resolves and its group carries a SETUP
+// sibling (OFS operator allocated the changeover after the alert's snapshot at
+// event start), the escalation/resolved card is reclassified as that setup —
+// showing the real changeover product instead of the stale pre-setup job.
+//
 // Designed to run on a schedule (every minute via pg_cron).
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -331,6 +336,30 @@ function productFact(ctx: JobContext | null): { title: string; value: string } |
 
 function isSetupType(downtimeType: string | null): boolean {
   return (downtimeType ?? "").toUpperCase() === "SETUP";
+}
+
+// When an UNPLANNED event escalates or resolves, OFS has usually allocated the
+// setup by then — even when the operator was late to do it (sometimes >10 min
+// after the changeover started). The group of rows for the same physical event
+// then contains a SETUP sibling carrying the correct product. Find it so the
+// escalation/resolved card can be reclassified from the stale unplanned face.
+function findSetupSibling(members: DowntimeRow[]): DowntimeRow | null {
+  return members.find((m) => isSetupType(m.downtime_type)) ?? null;
+}
+
+// Rebuild a logical event as its SETUP sibling: the setup carries the real
+// reason (synthesized from the order label — already the product name) and the
+// metadata (order_client_id) that lets findJobContext attribute the product.
+// Keeps the original event's id, timing and alert-state flags.
+function overlaySetup(enriched: DowntimeRow, setup: DowntimeRow): DowntimeRow {
+  return {
+    ...enriched,
+    downtime_type: setup.downtime_type ?? enriched.downtime_type,
+    reason: setup.reason ?? enriched.reason,
+    category: setup.category ?? enriched.category,
+    crew_name: setup.crew_name ?? enriched.crew_name,
+    metadata: setup.metadata ?? enriched.metadata,
+  };
 }
 
 // Color-code alerts by downtime type so they are visually distinguishable in Teams.
@@ -1031,7 +1060,14 @@ Deno.serve(async (req: Request) => {
           }
           continue;
         }
-        const payload = buildResolvedMessage(enriched, ctx);
+        // Reclassify as the SETUP sibling if one exists (operator allocated the
+        // setup late), so the resolved card matches the corrected escalation and
+        // names the real changeover product instead of the stale snapshot job.
+        const setupSibling = findSetupSibling(members);
+        const resolvedEvt = setupSibling ? overlaySetup(enriched, setupSibling) : enriched;
+        const resolvedCtx = setupSibling ? await findJobContext(supabase, resolvedEvt) : ctx;
+        const resolvedProduct = resolvedCtx?.product ?? resolvedCtx?.orderName ?? null;
+        const payload = buildResolvedMessage(resolvedEvt, resolvedCtx);
         // Optimistic lock: claim resolved_alert_sent=true BEFORE sending.
         for (const m of members) {
           await supabase
@@ -1043,10 +1079,10 @@ Deno.serve(async (req: Request) => {
         await logAlert(supabase, {
           alertType: "resolved",
           eventId: enriched.id,
-          reason: enriched.reason,
-          category: enriched.category,
-          product,
-          message: `Downtime Resolved — ${enriched.console_name ?? "Production Line"}`,
+          reason: resolvedEvt.reason,
+          category: resolvedEvt.category,
+          product: resolvedProduct,
+          message: `Downtime Resolved — ${resolvedEvt.console_name ?? "Production Line"}`,
           status: res.ok ? "sent" : "failed",
           httpStatus: res.httpStatus,
         });
@@ -1078,6 +1114,18 @@ Deno.serve(async (req: Request) => {
         );
         if (crossed.length > 0) {
           const m = crossed[crossed.length - 1]!;
+          // OFS has usually allocated the setup by now (even when the operator
+          // was late). Reclassify the card as its SETUP sibling so it shows the
+          // real changeover product rather than whichever job the snapshot at
+          // the event start happened to report.
+          const setupSibling = findSetupSibling(members);
+          const escalationEvt = setupSibling
+            ? overlaySetup(enriched, setupSibling)
+            : enriched;
+          const escalationCtx = setupSibling
+            ? await findJobContext(supabase, escalationEvt)
+            : ctx;
+          const escalationProduct = escalationCtx?.product ?? escalationCtx?.orderName ?? null;
           // Optimistic lock: claim last_escalation_minutes BEFORE sending.
           const prevEsc = enriched.last_escalation_minutes ?? null;
           for (const mb of members) {
@@ -1086,15 +1134,15 @@ Deno.serve(async (req: Request) => {
               .update({ last_escalation_minutes: m, updated_at: new Date().toISOString() })
               .eq("id", mb.id);
           }
-          const payload = buildEscalationMessage(enriched, ctx, m);
+          const payload = buildEscalationMessage(escalationEvt, escalationCtx, m);
           const res = await sendTeams(webhookUrl, payload);
           await logAlert(supabase, {
             alertType: "escalation",
             eventId: enriched.id,
-            reason: enriched.reason,
-            category: enriched.category,
-            product,
-            message: `Downtime Still Ongoing — ${enriched.console_name ?? "Production Line"} (${m} min)`,
+            reason: escalationEvt.reason,
+            category: escalationEvt.category,
+            product: escalationProduct,
+            message: `Downtime Still Ongoing — ${escalationEvt.console_name ?? "Production Line"} (${m} min)`,
             status: res.ok ? "sent" : "failed",
             httpStatus: res.httpStatus,
           });

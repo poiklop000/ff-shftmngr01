@@ -338,17 +338,23 @@ async function fetchLiveRowByIdentity(
   start: number,
   type: string,
 ): Promise<DowntimeEvent | null> {
+  // The same event can be reported with slightly different start epochs
+  // between polls (a few ms of OFS drift), so use the identity tolerance
+  // instead of an exact epoch match. An exact match that misses would fall
+  // through to the upsert below and resurrect the row as unresolved.
   const { data, error } = await supabase
     .from("downtime_events")
     .select("*")
     .eq("console_id", CONSOLE)
-    .eq("start_epoch", start)
+    .gte("start_epoch", start - 60_000)
+    .lte("start_epoch", start + 60_000)
     .eq("downtime_type", type)
     .eq("source", "live")
-    .eq("user_edited", false)
-    .maybeSingle();
+    .eq("user_edited", false);
   if (error) throw new Error(error.message);
-  return (data as DowntimeEvent | null) ?? null;
+  const rows = ((data ?? []) as unknown as DowntimeEvent[])
+    .sort((a, b) => Math.abs(a.start_epoch - start) - Math.abs(b.start_epoch - start));
+  return rows[0] ?? null;
 }
 
 // True when two events positively concern the same product: both carry an
@@ -520,12 +526,18 @@ async function updateEventFromSpan(
     };
     if (liveDuplicate) {
       // Migrate alert state from the superseded live row to the express row
-      // so the occurred/resolved notifications don't re-fire.
-      merged.alert_sent = liveDuplicate.alert_sent ?? merged.alert_sent ?? false;
+      // so the occurred/resolved notifications don't re-fire. Alert flags only
+      // ever upgrade (OR) and escalations only ever increase — a freshly
+      // re-inserted live row starts with alert_sent=false, and downgrading the
+      // express row to that would let the occurred alert re-fire every time
+      // the live duplicate is cycled through the merge.
+      merged.alert_sent = (merged.alert_sent ?? false) || (liveDuplicate.alert_sent ?? false);
       merged.resolved_alert_sent =
-        liveDuplicate.resolved_alert_sent ?? merged.resolved_alert_sent ?? false;
-      merged.last_escalation_minutes =
-        liveDuplicate.last_escalation_minutes ?? merged.last_escalation_minutes ?? null;
+        (merged.resolved_alert_sent ?? false) || (liveDuplicate.resolved_alert_sent ?? false);
+      merged.last_escalation_minutes = Math.max(
+        merged.last_escalation_minutes ?? 0,
+        liveDuplicate.last_escalation_minutes ?? 0,
+      ) || null;
       patch.alert_sent = merged.alert_sent;
       patch.resolved_alert_sent = merged.resolved_alert_sent;
       patch.last_escalation_minutes = merged.last_escalation_minutes;
@@ -787,7 +799,7 @@ async function captureOnce(supabase: ReturnType<typeof getSupabase>): Promise<Ca
 async function resolveGhosts(supabase: ReturnType<typeof getSupabase>): Promise<number> {
   const { data: unresolved, error } = await supabase
     .from("downtime_events")
-    .select("id, start_epoch")
+    .select("id, start_epoch, downtime_type, metadata")
     .eq("console_id", CONSOLE)
     .eq("resolved", false)
     .eq("user_edited", false);
@@ -795,26 +807,53 @@ async function resolveGhosts(supabase: ReturnType<typeof getSupabase>): Promise<
   if (!unresolved || unresolved.length === 0) return 0;
 
   let resolvedCount = 0;
-  for (const ghost of unresolved as unknown as { id: number; start_epoch: number }[]) {
+  for (const ghost of unresolved as unknown as Array<{
+    id: number;
+    start_epoch: number;
+    downtime_type: string | null;
+    metadata: Record<string, unknown> | null;
+  }>) {
     const { data: sibling, error: sibError } = await supabase
       .from("downtime_events")
-      .select("end_epoch, duration_ms")
+      .select("id, start_epoch, end_epoch, downtime_type, duration_ms, metadata")
       .eq("resolved", true)
       .neq("id", ghost.id)
       .gte("start_epoch", ghost.start_epoch - 60_000)
       .lte("start_epoch", ghost.start_epoch + 60_000)
       .order("start_epoch", { ascending: true })
-      .limit(1)
-      .maybeSingle();
+      .limit(5);
     if (sibError) throw new Error(sibError.message);
-    if (!sibling || sibling.end_epoch == null) continue;
+
+    // A resolved "sibling" only folds the ghost if it actually covers the
+    // ghost's moment — same physical window (start inside [sibling.start,
+    // sibling.end)) AND the same event type or the same product. Without
+    // this, an unrelated resolved event whose start merely happens to land
+    // within 60s (e.g. a planned CIP ending right where a setup began) gets
+    // stamped onto the ghost, stamping its end/duration onto the wrong event.
+    const covering = ((sibling ?? []) as unknown as Array<{
+      id: number;
+      start_epoch: number;
+      end_epoch: number | null;
+      downtime_type: string | null;
+      duration_ms: number | null;
+      metadata: Record<string, unknown> | null;
+    }>).find(
+      (s) =>
+        s.id !== ghost.id &&
+        s.end_epoch != null &&
+        s.start_epoch <= ghost.start_epoch &&
+        ghost.start_epoch < s.end_epoch &&
+        (s.downtime_type === ghost.downtime_type ||
+          sameProduct(ghost, s)),
+    );
+    if (!covering || covering.end_epoch == null) continue;
 
     const { error: updateError } =     await supabase
       .from("downtime_events")
       .update({
         resolved: true,
-        end_epoch: sibling.end_epoch,
-        duration_ms: sibling.duration_ms,
+        end_epoch: covering.end_epoch,
+        duration_ms: covering.duration_ms,
         updated_at: new Date().toISOString(),
       })
       .eq("id", ghost.id);

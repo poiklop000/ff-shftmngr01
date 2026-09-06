@@ -426,13 +426,15 @@ function json(body: unknown, status = 200): Response {
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: corsHeaders });
-  }
-  if (req.method !== "GET" && req.method !== "POST") {
-    return json({ error: "Only GET and POST are supported" }, 405);
-  }
   try {
+    let stage = "init";
+    if (req.method === "OPTIONS") {
+      return new Response(null, { status: 200, headers: corsHeaders });
+    }
+    if (req.method !== "GET" && req.method !== "POST") {
+      return json({ error: "Only GET and POST are supported" }, 405);
+    }
+    try {
     const supabase = getSupabase();
     if (!(await isOfsEnabled(supabase))) {
       console.log(`[sync-spans-history] ${new Date().toISOString()} skipped — OFS disabled`);
@@ -442,11 +444,13 @@ Deno.serve(async (req: Request) => {
     // 1. Fetch downtime history from express/spans
     const spans = await fetchSpansHistory();
     console.log(`[sync-spans-history] Fetched ${spans.length} express spans from OFS`);
+    stage = "fetch";
 
     // 2. Fetch live/spans for setup and running-slow events
     const liveSpans = await fetchLiveSpans();
     const liveStateSpans = extractLiveSpans(liveSpans);
     console.log(`[sync-spans-history] Found ${liveStateSpans.length} active setup/running-slow span(s)`);
+    stage = "live";
 
     // 3. Resolve stale live events — any open SETUP/RUNNING_SLOW event whose
     //    span ID is no longer in the live feed has ended. OFS also emits
@@ -495,6 +499,7 @@ Deno.serve(async (req: Request) => {
 
     const staleLive = openLive.filter((e) => !liveIds.has(e.id) && !adoptedIds.has(e.id));
     const now = Date.now();
+    stage = "stale-resolve";
     for (const evt of staleLive) {
       await supabase
         .from("downtime_events")
@@ -513,6 +518,7 @@ Deno.serve(async (req: Request) => {
     // 4. Convert all spans to records
     const expressRecords = spans.map(expressSpanToRecord);
     const liveRecords = liveStateSpans.map((s) => setupSpanToRecord(s, liveSpans?.items ?? []));
+    stage = "dup-removal";
 
     // 4b. Prefer the express (history) record over a live capture that
     //     represents the same event. capture-downtime may have written a
@@ -564,6 +570,7 @@ Deno.serve(async (req: Request) => {
 
     let upserted = 0;
     const BATCH_SIZE = 50;
+    stage = "live-upsert";
 
     // Upsert live setup/slow records individually, adopting an existing open
     // row when OFS changed span ID for the same event instead of inserting a
@@ -677,28 +684,60 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Fetch IDs of existing rows so we only carry over flags for NEW rows
+    // Fetch IDs of existing rows so we only carry over flags for NEW rows, and
+    // so we can preserve the DB resolution state of rows OFS re-adds as
+    // ongoing (e.g. a healed/absent span that reappears in the current feed).
     const expressIds = expressRecords.map((r) => r.id).filter((id): id is number => id != null);
     const { data: existingIds } = await supabase
       .from("downtime_events")
-      .select("id")
+      .select("id, resolved, end_epoch, duration_ms")
       .in("id", expressIds);
     const existingIdSet = new Set((existingIds ?? []).map((r) => r.id));
+    const existingById = new Map<number, { resolved: boolean; end_epoch: number | null; duration_ms: number | null }>(
+      (existingIds ?? []).map((r) => [r.id, r]),
+    );
+    stage = "express-upsert";
 
     for (let i = 0; i < expressRecords.length; i += BATCH_SIZE) {
-      const batch = expressRecords.slice(i, i + BATCH_SIZE).map((rec) => {
+      const batch = expressRecords.slice(i, i + BATCH_SIZE);
+      // Resurrection guard: if OFS re-adds a span we already marked resolved
+      // (healed orphan, historical end) as ongoing, keep the DB truth instead
+      // of flipping it back to unresolved — otherwise the alert chain would
+      // restart. Shape stays identical across rows (uniform key set) so the
+      // PostgREST NOT NULL trap for multi-row upserts can't trigger.
+      const alignedBatch = batch.map((rec) => {
+        if (rec.id == null || rec.resolved) return rec;
+        const existing = existingById.get(rec.id);
+        if (existing?.resolved) {
+          return {
+            ...rec,
+            resolved: true,
+            end_epoch: existing.end_epoch ?? rec.end_epoch ?? null,
+            duration_ms: existing.duration_ms ?? rec.duration_ms ?? null,
+          };
+        }
+        return rec;
+      });
+      // Rows to receive carried-over alert flags AFTER insertion. Deferred so
+      // every row in the multi-row upsert has the identical key set: PostgREST
+      // sends `null` for a column that only some rows carry, which trips the
+      // NOT NULL constraint on alert_sent and would fail the entire batch.
+      const flagCarry: Array<{
+        rec: (typeof batch)[number];
+        flags: { alert_sent: boolean; resolved_alert_sent: boolean; last_escalation_minutes: number | null };
+      }> = [];
+      for (const rec of batch) {
         if (rec.id != null && !existingIdSet.has(rec.id) && rec.downtime_type) {
           const key = `${rec.start_epoch}_${rec.downtime_type}`;
           const flags = alertFlagLookup.get(key);
           if (flags && (flags.alert_sent || flags.resolved_alert_sent)) {
-            return { ...rec, ...flags };
+            flagCarry.push({ rec, flags });
           }
         }
-        return rec;
-      });
+      }
       const { data, error } = await supabase
         .from("downtime_events")
-        .upsert(batch, {
+        .upsert(alignedBatch, {
           onConflict: "id",
           ignoreDuplicates: false,
         })
@@ -708,10 +747,77 @@ Deno.serve(async (req: Request) => {
         throw new Error(error.message);
       }
       upserted += data?.length ?? 0;
+      for (const { rec, flags } of flagCarry) {
+        const { error: flagErr } = await supabase
+          .from("downtime_events")
+          .update({
+            alert_sent: flags.alert_sent,
+            resolved_alert_sent: flags.resolved_alert_sent,
+            last_escalation_minutes: flags.last_escalation_minutes,
+          })
+          .eq("id", rec.id);
+        if (flagErr) throw new Error(flagErr.message);
+      }
+    }
+
+    // --- Orphaned express-row self-heal ---
+    // An open history row whose span id is no longer in the current express
+    // response has fallen out of OFS's history feed without ever reporting an
+    // end (OFS reclassified or dropped the span). Normal sync can never close
+    // it (upserting requires the id we no longer receive) and capture-downtime
+    // leaves history rows alone, so it would stay "ongoing" forever and its
+    // alert can re-fire whenever a transient duplicate resets it. Close it
+    // with its last captured duration once it is clearly stale and untouched.
+    stage = "orphans";
+    let resolvedOrphans = 0;
+    const ORPHAN_MIN_AGE_MS = 60 * 60 * 1000;
+    const ORPHAN_QUIET_MS = 10 * 60 * 1000;
+    const expressIdSet = new Set(
+      expressRecords.map((r) => r.id).filter((id): id is number => id != null),
+    );
+    const { data: openHistoryRows, error: orphanErr } = await supabase
+      .from("downtime_events")
+      .select("id, start_epoch, duration_ms, created_at, updated_at")
+      .eq("console_id", CONSOLE)
+      .eq("source", "history")
+      .eq("resolved", false)
+      .eq("user_edited", false);
+    if (orphanErr) throw new Error(orphanErr.message);
+    for (const row of openHistoryRows ?? []) {
+      if (expressIdSet.has(row.id)) continue;
+      if (now - row.start_epoch < ORPHAN_MIN_AGE_MS) continue;
+      if (now - new Date(row.created_at).getTime() < ORPHAN_MIN_AGE_MS) continue;
+      if (now - new Date(row.updated_at).getTime() < ORPHAN_QUIET_MS) continue;
+      // Leave it alone if any active live span still covers the window —
+      // capture-downtime may be about to adopt it.
+      if (
+        liveStateSpans.some(
+          (s) => s.start != null && s.start <= row.start_epoch + 60_000 &&
+            s.start + (s.duration ?? 0) >= row.start_epoch,
+        )
+      ) {
+        continue;
+      }
+      const durationMs =
+        row.duration_ms && row.duration_ms > 0 ? row.duration_ms : Math.max(0, now - row.start_epoch);
+      const { error: orphanUpdateErr } = await supabase
+        .from("downtime_events")
+        .update({
+          resolved: true,
+          end_epoch: row.start_epoch + durationMs,
+          duration_ms: durationMs,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", row.id);
+      if (orphanUpdateErr) throw new Error(orphanUpdateErr.message);
+      resolvedOrphans++;
+    }
+    if (resolvedOrphans > 0) {
+      console.log(`[sync-spans-history] Resolved ${resolvedOrphans} orphaned express event(s) no longer in the OFS feed`);
     }
 
     console.log(
-      `[sync-spans-history] ${new Date().toISOString()} synced ${spans.length} express + ${liveStateSpans.length} live (${upserted} upserted, ${removedLiveDuplicates} live dupes removed, ${staleLive.length} resolved)`,
+      `[sync-spans-history] ${new Date().toISOString()} synced ${spans.length} express + ${liveStateSpans.length} live (${upserted} upserted, ${removedLiveDuplicates} live dupes removed, ${staleLive.length} resolved, ${resolvedOrphans} orphans resolved)`,
     );
     return json({
       ok: true,
@@ -720,11 +826,17 @@ Deno.serve(async (req: Request) => {
       upserted,
       removedLiveDuplicates,
       resolvedLive: staleLive.length,
+      resolvedOrphans,
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    console.error(`[sync-spans-history] ${new Date().toISOString()} error:`, message);
-    return json({ ok: false, error: message }, 502);
+console.error(`[sync-spans-history] ${new Date().toISOString()} error at ${String(stage ?? "unset")}:`, message);
+      return json({ ok: false, error: message, stage: stage ?? "unset" }, 502);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error(`[sync-spans-history] ${new Date().toISOString()} FATAL error:`, message);
+    return json({ ok: false, fatal: true, error: message }, 502);
   }
 });

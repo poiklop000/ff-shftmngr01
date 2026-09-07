@@ -19,7 +19,7 @@ import { loadLiveIntervals } from '@/lib/liveConfig';
 import { fetchOfsStatus, classifyLineState, LINE_STATE_COLORS, type OfsLiveStatus, type OfsRunState, type LineStateClass } from '@/lib/ofs';
 import { loadJobOverride, saveJobOverride, deleteJobOverride, type JobOverride } from '@/lib/jobOverrides';
 import { fetchHourlySummaryByDate, type HourlySummaryEntry } from '@/lib/counterLogs';
-import { fetchHourlyRatedSpeeds } from '@/lib/jobSnapshots';
+import { fetchHourlyRatedSpeeds, fetchSnapshotsForShiftState, type SnapshotStateRow } from '@/lib/jobSnapshots';
 import { fetchDowntimeByDate, downtimeEventEndText, type DowntimeEvent } from '@/lib/downtime';
 import { filterByShiftWindow, getActiveHours, SHIFT_LABELS, type Shift } from '@/types';
 import { DowntimeTimeline } from '@/components/DowntimeTimeline';
@@ -65,6 +65,7 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [downtimeEvents, setDowntimeEvents] = useState<DowntimeEvent[]>([]);
   const [downtimeLoading, setDowntimeLoading] = useState(false);
+  const [snapshotStateRows, setSnapshotStateRows] = useState<SnapshotStateRow[]>([]);
   const [liveRefreshMs, setLiveRefreshMs] = useState(DEFAULT_LIVE_MS);
   const [summaryRefreshMs, setSummaryRefreshMs] = useState(DEFAULT_SUMMARY_MS);
   const [override, setOverride] = useState<JobOverride | null>(null);
@@ -165,6 +166,22 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
     const id = setInterval(() => loadDowntime(date), summaryRefreshMs);
     return () => clearInterval(id);
   }, [loadDowntime, date, summaryRefreshMs]);
+
+  const loadSnapshotStates = useCallback(async (shiftDate: string) => {
+    try {
+      const data = await fetchSnapshotsForShiftState(shiftDate, currentShift, customHours);
+      setSnapshotStateRows(data);
+    } catch {
+      setSnapshotStateRows([]);
+    }
+  }, [currentShift, customHours]);
+
+  useEffect(() => {
+    if (!date) return;
+    loadSnapshotStates(date);
+    const id = setInterval(() => loadSnapshotStates(date), summaryRefreshMs);
+    return () => clearInterval(id);
+  }, [loadSnapshotStates, date, summaryRefreshMs]);
 
   const lineStateClass = classifyLineState(status?.runstate);
 
@@ -557,6 +574,7 @@ export function LiveLineStatus({ currentShift, customHours, date }: LiveLineStat
         consoleTime={consoleTime}
         loading={downtimeLoading}
         lineState={lineStateClass}
+        snapshotStates={snapshotStateRows}
       />
 
       <div className="flex flex-wrap items-center gap-3 mb-4 text-[11px] font-semibold">

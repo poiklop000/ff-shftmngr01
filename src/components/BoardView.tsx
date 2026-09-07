@@ -24,6 +24,7 @@ import {
 } from '@/lib/ofs';
 import { loadJobOverride, type JobOverride } from '@/lib/jobOverrides';
 import { fetchDowntimeForShift, downtimeEventEndText, type DowntimeEvent } from '@/lib/downtime';
+import { fetchSnapshotsForShiftState, type SnapshotStateRow } from '@/lib/jobSnapshots';
 import {
   filterByShiftWindow,
   getActiveHours,
@@ -180,6 +181,7 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
   const [liveRefreshMs, setLiveRefreshMs] = useState(DEFAULT_LIVE_MS);
   const [summaryRefreshMs, setSummaryRefreshMs] = useState(DEFAULT_SUMMARY_MS);
   const [downtimeEvents, setDowntimeEvents] = useState<DowntimeEvent[]>([]);
+  const [timelineSnapshots, setTimelineSnapshots] = useState<SnapshotStateRow[]>([]);
   const [boardLoading, setBoardLoading] = useState(false);
   const [override, setOverride] = useState<JobOverride | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -249,6 +251,13 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
         // keep the last known events on the board if a refresh fails
       } finally {
         if (!cancelled) setBoardLoading(false);
+      }
+      try {
+        const snaps = await fetchSnapshotsForShiftState(date, shift, []);
+        if (cancelled) return;
+        setTimelineSnapshots(snaps);
+      } catch {
+        if (!cancelled) setTimelineSnapshots([]);
       }
     };
 
@@ -685,6 +694,7 @@ export function BoardView({ transitionMs = VIEW_ROTATE_MS, shiftLayout = '12h' }
                 consoleTime={consoleTime}
                 loading={boardLoading}
                 lineState={lineStateClass}
+                snapshotStates={timelineSnapshots}
               />
             </div>
           </div>

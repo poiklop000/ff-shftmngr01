@@ -14,7 +14,7 @@ import { DowntimeTimeline } from '@/components/DowntimeTimeline';
 import { PageHelp } from '@/components/PageHelp';
 import { fetchDowntimeForShift, downtimeEventEndText, type DowntimeEvent } from '@/lib/downtime';
 import { classifyLineState, fetchOfsStatus, type OfsLiveStatus } from '@/lib/ofs';
-import { fetchJobsForShift } from '@/lib/jobSnapshots';
+import { fetchJobsForShift, fetchSnapshotsForShiftState, type SnapshotStateRow } from '@/lib/jobSnapshots';
 import { useAutoGrow } from '@/lib/ui';
 
 function csvEscape(value: string | number): string {
@@ -73,6 +73,7 @@ export function MonitoringView({
   const [loadingRecord, setLoadingRecord] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [timelineEvents, setTimelineEvents] = useState<DowntimeEvent[]>([]);
+  const [timelineSnapshots, setTimelineSnapshots] = useState<SnapshotStateRow[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [consoleTime, setConsoleTime] = useState('-');
   const [lineState, setLineState] = useState<string>('');
@@ -82,13 +83,19 @@ export function MonitoringView({
   const activeHours = getActiveHours(currentShift, customHours);
 
   const loadTimeline = useCallback(async (shift: Shift, customHrs: string[], shiftDate: string) => {
-    if (!shiftDate) { setTimelineEvents([]); return; }
+    if (!shiftDate) { setTimelineEvents([]); setTimelineSnapshots([]); return; }
     setTimelineLoading(true);
     try {
       const events = await fetchDowntimeForShift(shift, customHrs, shiftDate);
       setTimelineEvents(events);
     } catch {
       setTimelineEvents([]);
+    }
+    try {
+      const snaps = await fetchSnapshotsForShiftState(shiftDate, shift, customHrs);
+      setTimelineSnapshots(snaps);
+    } catch {
+      setTimelineSnapshots([]);
     } finally {
       setTimelineLoading(false);
     }
@@ -526,6 +533,7 @@ export function MonitoringView({
         consoleTime={consoleTime}
         loading={timelineLoading}
         lineState={lineState}
+        snapshotStates={timelineSnapshots}
       />
 
       <ShiftTable

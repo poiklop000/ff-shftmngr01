@@ -360,7 +360,7 @@ function toNum(v: number | null | undefined): number {
 const NOT_RUNNING_RE = /cleaning|setup|set.?up|down|stop|finish|complete|idle|standby|wait|maintenance|maintain|break|lunch|held|hold|error|fault|alarm|pause|not.?running|inactive/i;
 const RUNNING_RE = /\b(running|run|producing|production)\b|run\s?slow/i;
 
-function isRunningState(state: string | null | undefined): boolean {
+export function isRunningState(state: string | null | undefined): boolean {
   if (!state) return false;
   // Explicitly-known "not running" states always win.
   if (NOT_RUNNING_RE.test(state)) return false;

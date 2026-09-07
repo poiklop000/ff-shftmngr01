@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Activity, Loader2 } from 'lucide-react';
 import { consoleTimeToShiftMinutes, getActiveHours, type Shift } from '@/types';
 import type { DowntimeEvent } from '@/lib/downtime';
+import { isRunningState, type SnapshotStateRow } from '@/lib/jobSnapshots';
 
 const TYPE_COLORS: Record<string, string> = {
   UNPLANNED: '#dc2626',
@@ -57,20 +58,21 @@ function computeNowPct(
   const dateMatch = consoleTime.match(/^(\d{4}-\d{2}-\d{2})/);
   if (dateMatch) {
     const consoleDate = dateMatch[1]!;
-    if (consoleDate === shiftDate) {
-    } else if (isOvernight) {
-      const [sy, sm, sd] = shiftDate.split('-').map(Number);
-      const [ey, em, ed] = consoleDate.split('-').map(Number);
-      const dayDiff = Math.round(
-        (Date.UTC(ey, em - 1, ed) - Date.UTC(sy, sm - 1, sd)) / 86_400_000,
-      );
-      if (dayDiff === 1) {
-        shiftMin = minOfDay + 1440;
+    if (consoleDate !== shiftDate) {
+      if (isOvernight) {
+        const [sy, sm, sd] = shiftDate.split('-').map(Number);
+        const [ey, em, ed] = consoleDate.split('-').map(Number);
+        const dayDiff = Math.round(
+          (Date.UTC(ey, em - 1, ed) - Date.UTC(sy, sm - 1, sd)) / 86_400_000,
+        );
+        if (dayDiff === 1) {
+          shiftMin = minOfDay + 1440;
+        } else {
+          return null;
+        }
       } else {
         return null;
       }
-    } else {
-      return null;
     }
   } else if (isOvernight && minOfDay < shiftStartMin) {
     shiftMin = minOfDay + 1440;
@@ -96,6 +98,50 @@ function getShiftTimeStatus(
   return 'in-progress';
 }
 
+type BgSegment = { leftPct: number; widthPct: number; color: string };
+
+// Builds an ended-shift background from the job snapshots captured during the
+// shift, so the timeline shows when the line was actually producing (green)
+// instead of assuming it went idle after the last downtime event. Returns null
+// when there is no snapshot evidence so the caller keeps the legacy fallback.
+function buildEndedShiftSegments(
+  snapshotStates: SnapshotStateRow[] | undefined,
+  date: string,
+  shiftStartMin: number,
+  shiftEndMin: number,
+  totalMin: number,
+): BgSegment[] | null {
+  const snaps = (snapshotStates ?? [])
+    .map((s) => ({
+      min: consoleTimeToShiftMinutes(s.captureTime, date),
+      running: isRunningState(s.runState),
+    }))
+    .filter((s) => s.min >= shiftStartMin && s.min < shiftEndMin)
+    .sort((a, b) => a.min - b.min);
+  if (snaps.length === 0) return null;
+
+  const segs: BgSegment[] = [];
+  const push = (fromMin: number, toMin: number, running: boolean) => {
+    if (toMin <= fromMin) return;
+    const leftPct = ((fromMin - shiftStartMin) / totalMin) * 100;
+    const widthPct = ((toMin - fromMin) / totalMin) * 100;
+    const color = running ? RUNNING_COLOR : IDLE_COLOR;
+    const prev = segs[segs.length - 1];
+    if (prev && prev.color === color && Math.abs(prev.leftPct + prev.widthPct - leftPct) < 0.01) {
+      prev.widthPct += widthPct;
+    } else {
+      segs.push({ leftPct, widthPct, color });
+    }
+  };
+
+  push(shiftStartMin, snaps[0]!.min, snaps[0]!.running);
+  for (let i = 0; i < snaps.length; i++) {
+    const to = i + 1 < snaps.length ? snaps[i + 1]!.min : shiftEndMin;
+    push(snaps[i]!.min, Math.min(to, shiftEndMin), snaps[i]!.running);
+  }
+  return segs;
+}
+
 interface TimelineBlock {
   leftPct: number;
   widthPct: number;
@@ -118,6 +164,7 @@ interface DowntimeTimelineProps {
   consoleTime: string;
   loading?: boolean;
   lineState?: string;
+  snapshotStates?: SnapshotStateRow[];
 }
 
 export function DowntimeTimeline({
@@ -128,6 +175,7 @@ export function DowntimeTimeline({
   consoleTime,
   loading,
   lineState,
+  snapshotStates,
 }: DowntimeTimelineProps) {
   const { blocks, hourMarks, nowPct, bgSegments, totalDowntimeMin, eventCount, status } = useMemo(() => {
     const hours = getActiveHours(currentShift, customHours);
@@ -138,6 +186,7 @@ export function DowntimeTimeline({
         nowPct: null,
         runWidthPct: 100,
         runColor: RUNNING_COLOR,
+        bgSegments: [{ leftPct: 0, widthPct: 100, color: RUNNING_COLOR }],
         totalDowntimeMin: 0,
         eventCount: 0,
         status: 'unknown' as ShiftTimeStatus,
@@ -208,39 +257,44 @@ export function DowntimeTimeline({
     type BgSegment = { leftPct: number; widthPct: number; color: string };
     let bgSegments: BgSegment[] = [];
 
-    if (status === 'ended' && events.length > 0) {
-      const sorted = [...events]
-        .filter((e) => e.start_text)
-        .map((e) => {
-          const s = consoleTimeToShiftMinutes(e.start_text!, date);
-          const end = e.resolved ? s + (e.duration_ms ?? 0) / 60000 : shiftEndMin;
-          return { startMin: s, endMin: end, resolved: e.resolved };
-        })
-        .filter((e) => e.endMin > shiftStartMin && e.startMin < shiftEndMin)
-        .sort((a, b) => b.startMin - a.startMin);
+    if (status === 'ended') {
+      const snapshotSegments = buildEndedShiftSegments(snapshotStates, date, shiftStartMin, shiftEndMin, totalMin);
+      if (snapshotSegments) {
+        bgSegments = snapshotSegments;
+      } else if (events.length > 0) {
+        const sorted = [...events]
+          .filter((e) => e.start_text)
+          .map((e) => {
+            const s = consoleTimeToShiftMinutes(e.start_text!, date);
+            const end = e.resolved ? s + (e.duration_ms ?? 0) / 60000 : shiftEndMin;
+            return { startMin: s, endMin: end, resolved: e.resolved };
+          })
+          .filter((e) => e.endMin > shiftStartMin && e.startMin < shiftEndMin)
+          .sort((a, b) => b.startMin - a.startMin);
 
-      const last = sorted[0];
-      if (last && !last.resolved) {
-        bgSegments = [{ leftPct: 0, widthPct: 100, color: RUNNING_COLOR }];
-      } else if (last) {
-        const eventEndMin = Math.min(last.endMin, shiftEndMin);
-        const idleStartPct = ((eventEndMin - shiftStartMin) / totalMin) * 100;
-        bgSegments = [
-          { leftPct: 0, widthPct: idleStartPct, color: RUNNING_COLOR },
-          { leftPct: idleStartPct, widthPct: 100 - idleStartPct, color: IDLE_COLOR },
-        ];
+        const last = sorted[0];
+        if (last && !last.resolved) {
+          bgSegments = [{ leftPct: 0, widthPct: 100, color: RUNNING_COLOR }];
+        } else if (last) {
+          const eventEndMin = Math.min(last.endMin, shiftEndMin);
+          const idleStartPct = ((eventEndMin - shiftStartMin) / totalMin) * 100;
+          bgSegments = [
+            { leftPct: 0, widthPct: idleStartPct, color: RUNNING_COLOR },
+            { leftPct: idleStartPct, widthPct: 100 - idleStartPct, color: IDLE_COLOR },
+          ];
+        } else {
+          bgSegments = [{ leftPct: 0, widthPct: 100, color: RUNNING_COLOR }];
+        }
       } else {
-        bgSegments = [{ leftPct: 0, widthPct: 100, color: RUNNING_COLOR }];
+        bgSegments = [{ leftPct: 0, widthPct: 100, color: IDLE_COLOR }];
       }
-    } else if (status === 'ended') {
-      bgSegments = [{ leftPct: 0, widthPct: 100, color: IDLE_COLOR }];
     } else {
       const color = lineState === 'idle' ? IDLE_COLOR : RUNNING_COLOR;
       bgSegments = [{ leftPct: 0, widthPct: runWidthPct, color }];
     }
 
     return { blocks, hourMarks, nowPct, runWidthPct, bgSegments, totalDowntimeMin, eventCount: blocks.length, status };
-  }, [events, currentShift, customHours, date, consoleTime, lineState]);
+  }, [events, currentShift, customHours, date, consoleTime, lineState, snapshotStates]);
 
   return (
     <div className="card rounded-lg p-4 mb-4 border border-slate-200 bg-white">
@@ -329,7 +383,9 @@ export function DowntimeTimeline({
             <p className="text-center text-[11px] text-slate-400 font-medium mt-2 m-0">
               {status === 'not-started'
                 ? "Shift hasn't started yet — no events to display."
-                : 'No downtime events this shift — line was idle.'}
+                : bgSegments.some((s) => s.color === RUNNING_COLOR)
+                  ? 'No downtime events recorded this shift.'
+                  : 'No downtime events this shift — line was idle.'}
             </p>
           )}
         </>

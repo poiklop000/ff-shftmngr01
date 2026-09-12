@@ -5,7 +5,9 @@
 //      the configured threshold. Tracked via the alert_sent column.
 //   2. RESOLVED — sent when a downtime event ends. Tracked via the
 //      resolved_alert_sent column. Only fires if the event lasted at least the
-//      threshold, and includes the total duration.
+//      threshold, and includes the total duration. Events stay candidates for
+//      a grace window (teams_resolved_alert_grace_minutes, default 60) so a
+//      late run or sync backfill can't silently skip the card.
 //   3. RECURRING — sent when 5+ downtimes with the same reason + category occur
 //      within a rolling 1-hour window. Re-fires at escalating thresholds
 //      (5, 7, 9, 11, ...). Tracked via the recurring_issue_alerts table.
@@ -742,6 +744,18 @@ Deno.serve(async (req: Request) => {
       return levels.length > 0 ? [...levels].sort((a, b) => a - b) : [30, 60, 120];
     })();
 
+    // Resolved events stay candidates for a grace window (default 60 min) so
+    // the resolved card isn't permanently skipped when a run is late or the
+    // resolution arrived via a sync backfill. Without this, a hard built-in
+    // cutoff (previously 10 min) silently dropped the card forever.
+    const { data: graceRow } = await supabase
+      .from("app_config")
+      .select("value")
+      .eq("key", "teams_resolved_alert_grace_minutes")
+      .maybeSingle();
+    const graceMinutes = Number(graceRow?.value);
+    const graceMs = (Number.isFinite(graceMinutes) && graceMinutes >= 0 ? graceMinutes : 60) * 60_000;
+
     if (!webhookUrl || !enabled) {
       console.log(
         `[teams-downtime-alert] ${new Date().toISOString()} skipped — webhook: ${!!webhookUrl}, enabled: ${enabled}`,
@@ -811,7 +825,50 @@ Deno.serve(async (req: Request) => {
     }
 
     const nowMs = Date.now();
-    const recentEndCutoffMs = nowMs - 10 * 60_000;
+    const recentEndCutoffMs = nowMs - graceMs;
+
+    // --- Claimed-but-never-delivered healing ---
+    // A crash (or lost write) between the claim update — alert_sent /
+    // resolved_alert_sent set true — and the actual send/log leaves an event
+    // flagged as sent with no card and no alert_log row (the lost Product Out
+    // of Spec resolved card on 2026-09-12). Reset the stale flag so the pass
+    // below retries. Bounded to the last 24h, guarded against in-flight claims
+    // (updated_at touched by the claim), and capped so a burst can't flood a
+    // channel.
+    const HEAL_WINDOW_MS = 24 * 60 * 60_000;
+    const CLAIM_TRUST_MS = 4 * 60_000;
+    const { data: stuckRows, error: stuckError } = await supabase
+      .from("downtime_events")
+      .select("id, alert_sent, resolved_alert_sent")
+      .or(`and(alert_sent.eq.true,resolved.eq.false),and(resolved_alert_sent.eq.true,resolved.eq.true)`)
+      .lte("updated_at", new Date(nowMs - CLAIM_TRUST_MS).toISOString())
+      .order("updated_at", { ascending: true })
+      .limit(50);
+    if (stuckError) throw new Error(stuckError.message);
+    if (stuckRows && stuckRows.length > 0) {
+      const stuckIds = (stuckRows as Array<{ id: number }>).map((r) => r.id);
+      const { data: loggedRows, error: loggedError } = await supabase
+        .from("alert_log")
+        .select("event_id")
+        .in("event_id", stuckIds)
+        .gte("created_at", new Date(nowMs - HEAL_WINDOW_MS).toISOString());
+      if (loggedError) throw new Error(loggedError.message);
+      const loggedIds = new Set<number>((loggedRows as Array<{ event_id: number | null }>).map((r) => r.event_id as number));
+      for (const row of stuckRows as Array<{ id: number; alert_sent: boolean; resolved_alert_sent: boolean }>) {
+        if (loggedIds.has(row.id)) continue;
+        const reset =
+          row.resolved_alert_sent
+            ? { resolved_alert_sent: false }
+            : { alert_sent: false };
+        await supabase
+          .from("downtime_events")
+          .update({ ...reset, updated_at: new Date().toISOString() })
+          .eq("id", row.id);
+        console.log(
+          `[teams-downtime-alert] healed lost ${row.resolved_alert_sent ? "resolved" : "occurred"} claim for event ${row.id}`,
+        );
+      }
+    }
 
     // Fetch events that need either an OCCURRED or RESOLVED alert.
     // Conditions:
